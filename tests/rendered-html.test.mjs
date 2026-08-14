@@ -24,6 +24,9 @@ test("server-renders the Common Days prototype", async () => {
   assert.match(html, /Find the break/);
   assert.match(html, /UIUC/);
   assert.match(html, /SAMPLE DATA/);
+  assert.match(html, /December 2026/);
+  assert.match(html, /Month calendar/);
+  assert.match(html, /EVERYONE IS OFF/);
   assert.doesNotMatch(html, /codex-preview/);
   assert.doesNotMatch(html, /react-loading-skeleton/);
 });
@@ -38,6 +41,8 @@ test("ships product metadata and interactive source", async () => {
   assert.match(page, /What school are we adding/);
   assert.match(page, /Submit for review/);
   assert.match(page, /getCommonBreaks/);
+  assert.match(page, /function MonthDay/);
+  assert.match(page, /No school-wide break reported/);
   assert.match(layout, /og\.png/);
   assert.match(layout, /Common Days/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);

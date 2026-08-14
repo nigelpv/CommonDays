@@ -22,6 +22,7 @@ type School = {
 };
 
 type ViewMode = "year" | "winter" | "spring";
+type DisplayMode = "month" | "timeline";
 type AddStage = "search" | "available" | "missing" | "extracting" | "review" | "published";
 
 const DAY = 86_400_000;
@@ -134,12 +135,59 @@ const views: Record<ViewMode, { start: string; end: string; months: string[] }> 
   },
 };
 
+const academicMonths = [
+  { year: 2026, month: 7, label: "August 2026" },
+  { year: 2026, month: 8, label: "September 2026" },
+  { year: 2026, month: 9, label: "October 2026" },
+  { year: 2026, month: 10, label: "November 2026" },
+  { year: 2026, month: 11, label: "December 2026" },
+  { year: 2027, month: 0, label: "January 2027" },
+  { year: 2027, month: 1, label: "February 2027" },
+  { year: 2027, month: 2, label: "March 2027" },
+  { year: 2027, month: 3, label: "April 2027" },
+  { year: 2027, month: 4, label: "May 2027" },
+  { year: 2027, month: 5, label: "June 2027" },
+  { year: 2027, month: 6, label: "July 2027" },
+];
+
+const weekdays = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+
 function utc(iso: string) {
   return Date.parse(`${iso}T00:00:00Z`);
 }
 
 function formatDay(iso: string) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(utc(iso)));
+}
+
+function formatFullDay(iso: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(utc(iso)));
+}
+
+function toIsoDate(year: number, month: number, day: number) {
+  return new Date(Date.UTC(year, month, day)).toISOString().slice(0, 10);
+}
+
+function buildMonthCells(year: number, month: number) {
+  const firstWeekday = new Date(Date.UTC(year, month, 1)).getUTCDay();
+  const dayCount = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const cells = [
+    ...Array.from({ length: firstWeekday }, () => null),
+    ...Array.from({ length: dayCount }, (_, index) => toIsoDate(year, month, index + 1)),
+  ];
+  const trailingCells = (7 - (cells.length % 7)) % 7;
+  return [...cells, ...Array.from({ length: trailingCells }, () => null)];
+}
+
+function eventOnDate(school: School, iso: string) {
+  const day = utc(iso);
+  return school.breaks.find((event) => day >= utc(event.start) && day <= utc(event.end));
 }
 
 function daysBetween(start: string, end: string) {
@@ -217,6 +265,47 @@ function TimelineBar({ event, view, common = false }: { event: BreakEvent; view:
   );
 }
 
+function MonthDay({
+  iso,
+  schools,
+  selected,
+  onSelect,
+}: {
+  iso: string;
+  schools: School[];
+  selected: boolean;
+  onSelect: (date: string) => void;
+}) {
+  const events = schools.map((school) => eventOnDate(school, iso));
+  const freeCount = events.filter(Boolean).length;
+  const everyoneFree = schools.length >= 2 && freeCount === schools.length;
+  const dayNumber = Number(iso.slice(-2));
+  const weekday = new Date(utc(iso)).getUTCDay();
+  const spokenStatuses = schools
+    .map((school, index) => `${school.shortName} ${events[index] ? "has no classes" : "has no reported break"}`)
+    .join(", ");
+
+  return (
+    <button
+      className={`month-day ${everyoneFree ? "all-free-day" : ""} ${selected ? "selected-day" : ""} ${weekday === 0 || weekday === 6 ? "weekend-day" : ""}`}
+      onClick={() => onSelect(iso)}
+      aria-label={`${formatFullDay(iso)}. ${spokenStatuses}.${everyoneFree ? " Everyone overlaps." : ""}`}
+    >
+      <span className="day-number">{dayNumber}</span>
+      {everyoneFree ? <span className="all-free-stamp">✦ ALL OFF</span> : freeCount > 0 ? <span className="partial-stamp">{freeCount}/{schools.length} OFF</span> : null}
+      <span className="day-school-lines" aria-hidden="true">
+        {schools.slice(0, 4).map((school, index) => (
+          <span className={`day-school-line ${events[index] ? "is-free" : "is-busy"}`} key={school.id}>
+            <b>{school.initials}</b>
+            <i style={events[index] ? { background: school.color } : undefined} />
+          </span>
+        ))}
+        {schools.length > 4 ? <span className="more-school-lines">+{schools.length - 4} more</span> : null}
+      </span>
+    </button>
+  );
+}
+
 function Mark() {
   return (
     <span className="brand-mark" aria-hidden="true">
@@ -230,7 +319,10 @@ function Mark() {
 export default function Home() {
   const [schools, setSchools] = useState(demoSchools);
   const [selectedIds, setSelectedIds] = useState(["uiuc", "berkeley", "nyu"]);
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("month");
   const [viewMode, setViewMode] = useState<ViewMode>("year");
+  const [monthIndex, setMonthIndex] = useState(4);
+  const [selectedDate, setSelectedDate] = useState("2026-12-22");
   const [addOpen, setAddOpen] = useState(false);
   const [stage, setStage] = useState<AddStage>("search");
   const [query, setQuery] = useState("");
@@ -244,14 +336,26 @@ export default function Home() {
     [schools, selectedIds],
   );
   const view = views[viewMode];
+  const currentMonth = academicMonths[monthIndex];
+  const monthCells = useMemo(
+    () => buildMonthCells(currentMonth.year, currentMonth.month),
+    [currentMonth.year, currentMonth.month],
+  );
   const commonBreaks = useMemo(
     () => getCommonBreaks(selectedSchools, view.start, view.end),
     [selectedSchools, view.start, view.end],
   );
-  const bestBreak = useMemo(
-    () => [...commonBreaks].sort((a, b) => daysBetween(b.start, b.end) - daysBetween(a.start, a.end))[0],
-    [commonBreaks],
+  const allCommonBreaks = useMemo(
+    () => getCommonBreaks(selectedSchools, views.year.start, views.year.end),
+    [selectedSchools],
   );
+  const bestBreak = useMemo(
+    () => [...allCommonBreaks].sort((a, b) => daysBetween(b.start, b.end) - daysBetween(a.start, a.end))[0],
+    [allCommonBreaks],
+  );
+  const selectedDayEvents = selectedSchools.map((school) => ({ school, event: eventOnDate(school, selectedDate) }));
+  const selectedDayFreeCount = selectedDayEvents.filter((status) => status.event).length;
+  const selectedDayEveryoneFree = selectedSchools.length >= 2 && selectedDayFreeCount === selectedSchools.length;
   const candidate = schools.find((school) => school.id === candidateId) ?? null;
   const searchResults = schools.filter((school) => {
     const haystack = `${school.name} ${school.shortName} ${school.location}`.toLowerCase();
@@ -319,6 +423,24 @@ export default function Home() {
   function copyLink() {
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
+  }
+
+  function changeMonth(nextIndex: number) {
+    const clamped = Math.max(0, Math.min(academicMonths.length - 1, nextIndex));
+    const nextMonth = academicMonths[clamped];
+    setMonthIndex(clamped);
+    setSelectedDate(toIsoDate(nextMonth.year, nextMonth.month, 1));
+  }
+
+  function showBestBreak() {
+    if (!bestBreak) return;
+    const bestDate = new Date(utc(bestBreak.start));
+    const matchingMonth = academicMonths.findIndex(
+      (month) => month.year === bestDate.getUTCFullYear() && month.month === bestDate.getUTCMonth(),
+    );
+    if (matchingMonth >= 0) setMonthIndex(matchingMonth);
+    setSelectedDate(bestBreak.start);
+    setDisplayMode("month");
   }
 
   return (
@@ -428,12 +550,21 @@ export default function Home() {
                   <span className="tiny-label">ACADEMIC YEAR 2026–27</span>
                   <h3>When is everyone free?</h3>
                 </div>
-                <div className="view-switcher" aria-label="Calendar range">
-                  {(["year", "winter", "spring"] as ViewMode[]).map((mode) => (
-                    <button key={mode} className={viewMode === mode ? "active" : ""} onClick={() => setViewMode(mode)}>
-                      {mode === "year" ? "Full year" : mode[0].toUpperCase() + mode.slice(1)}
-                    </button>
-                  ))}
+                <div className="display-switcher" aria-label="Calendar display">
+                  <button
+                    className={displayMode === "month" ? "active" : ""}
+                    aria-pressed={displayMode === "month"}
+                    onClick={() => setDisplayMode("month")}
+                  >
+                    Month calendar
+                  </button>
+                  <button
+                    className={displayMode === "timeline" ? "active" : ""}
+                    aria-pressed={displayMode === "timeline"}
+                    onClick={() => setDisplayMode("timeline")}
+                  >
+                    Year overview
+                  </button>
                 </div>
               </div>
 
@@ -445,46 +576,134 @@ export default function Home() {
                     <strong>{formatDay(bestBreak.start)} – {formatDay(bestBreak.end)}</strong>
                   </div>
                   <div className="best-count"><b>{daysBetween(bestBreak.start, bestBreak.end)}</b><span>days together</span></div>
-                  <button onClick={copyLink}>{copied ? "Link copied" : "Plan something →"}</button>
+                  <button onClick={showBestBreak}>Show on calendar →</button>
                 </div>
               ) : (
                 <div className="best-window empty-window"><div><span>NO SHARED WINDOW YET</span><strong>Try removing one school</strong></div></div>
               )}
 
-              <div className="timeline-shell">
-                <div className="timeline-labels timeline-months-label"><span>School</span></div>
-                <div className="timeline-months" style={{ gridTemplateColumns: `repeat(${view.months.length}, minmax(76px, 1fr))` }}>
-                  {view.months.map((month) => <span key={month}>{month}</span>)}
-                </div>
-
-                <div className="timeline-scroll">
-                  <div className="timeline-grid" style={{ minWidth: `${view.months.length * 76}px` }}>
-                    <div className="month-lines" style={{ gridTemplateColumns: `repeat(${view.months.length}, 1fr)` }}>
-                      {view.months.map((month) => <i key={month} />)}
+              {displayMode === "month" ? (
+                <div className="month-calendar-view">
+                  <div className="month-navigation">
+                    <button
+                      onClick={() => changeMonth(monthIndex - 1)}
+                      disabled={monthIndex === 0}
+                      aria-label="Previous month"
+                    >
+                      ←
+                    </button>
+                    <div aria-live="polite">
+                      <span>MONTH VIEW</span>
+                      <strong>{currentMonth.label}</strong>
                     </div>
+                    <button
+                      onClick={() => changeMonth(monthIndex + 1)}
+                      disabled={monthIndex === academicMonths.length - 1}
+                      aria-label="Next month"
+                    >
+                      →
+                    </button>
+                  </div>
 
-                    <div className="timeline-row common-row">
-                      <div className="timeline-name"><span className="all-dot">✦</span><strong>Everyone</strong></div>
-                      <div className="timeline-track">
-                        {commonBreaks.map((event) => <TimelineBar key={event.id} event={event} view={view} common />)}
+                  <div className="month-calendar-scroll">
+                    <div className="normal-calendar">
+                      <div className="weekday-row">
+                        {weekdays.map((day) => <span key={day}>{day}</span>)}
+                      </div>
+                      <div className="month-grid">
+                        {monthCells.map((iso, index) => (
+                          iso ? (
+                            <MonthDay
+                              key={iso}
+                              iso={iso}
+                              schools={selectedSchools}
+                              selected={selectedDate === iso}
+                              onSelect={setSelectedDate}
+                            />
+                          ) : (
+                            <div className="empty-day" aria-hidden="true" key={`empty-${index}`} />
+                          )
+                        ))}
                       </div>
                     </div>
+                  </div>
 
-                    {selectedSchools.map((school) => (
-                      <div className="timeline-row" key={school.id}>
-                        <div className="timeline-name"><span style={{ background: school.color }}>{school.initials}</span><strong>{school.shortName}</strong></div>
-                        <div className="timeline-track" style={{ "--school-color": school.color } as React.CSSProperties}>
-                          {school.breaks.map((event) => <TimelineBar key={event.id} event={event} view={view} />)}
+                  <div className={`day-detail-card ${selectedDayEveryoneFree ? "everyone-detail" : ""}`}>
+                    <div className="day-detail-heading">
+                      <div>
+                        <span>SELECTED DAY</span>
+                        <strong>{formatFullDay(selectedDate)}</strong>
+                      </div>
+                      <b>
+                        {selectedDayEveryoneFree
+                          ? "✦ EVERYONE IS OFF"
+                          : `${selectedDayFreeCount} OF ${selectedSchools.length} OFF`}
+                      </b>
+                    </div>
+                    <div className="day-detail-list">
+                      {selectedDayEvents.map(({ school, event }) => (
+                        <div className="day-detail-row" key={school.id}>
+                          <span style={{ background: school.color }}>{school.initials}</span>
+                          <strong>{school.shortName}</strong>
+                          <i className={event ? "status-off" : "status-unknown"}>
+                            {event ? event.title : "No school-wide break reported"}
+                          </i>
+                          <b>{event ? "NO CLASSES" : "—"}</b>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <>
+                  <div className="timeline-controls">
+                    <span>YEAR OVERVIEW</span>
+                    <div className="view-switcher" aria-label="Calendar range">
+                      {(["year", "winter", "spring"] as ViewMode[]).map((mode) => (
+                        <button key={mode} className={viewMode === mode ? "active" : ""} onClick={() => setViewMode(mode)}>
+                          {mode === "year" ? "Full year" : mode[0].toUpperCase() + mode.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="timeline-shell">
+                    <div className="timeline-labels timeline-months-label"><span>School</span></div>
+                    <div className="timeline-months" style={{ gridTemplateColumns: `repeat(${view.months.length}, minmax(76px, 1fr))` }}>
+                      {view.months.map((month) => <span key={month}>{month}</span>)}
+                    </div>
+
+                    <div className="timeline-scroll">
+                      <div className="timeline-grid" style={{ minWidth: `${view.months.length * 76}px` }}>
+                        <div className="month-lines" style={{ gridTemplateColumns: `repeat(${view.months.length}, 1fr)` }}>
+                          {view.months.map((month) => <i key={month} />)}
+                        </div>
+
+                        <div className="timeline-row common-row">
+                          <div className="timeline-name"><span className="all-dot">✦</span><strong>Everyone</strong></div>
+                          <div className="timeline-track">
+                            {commonBreaks.map((event) => <TimelineBar key={event.id} event={event} view={view} common />)}
+                          </div>
+                        </div>
+
+                        {selectedSchools.map((school) => (
+                          <div className="timeline-row" key={school.id}>
+                            <div className="timeline-name"><span style={{ background: school.color }}>{school.initials}</span><strong>{school.shortName}</strong></div>
+                            <div className="timeline-track" style={{ "--school-color": school.color } as React.CSSProperties}>
+                              {school.breaks.map((event) => <TimelineBar key={event.id} event={event} view={view} />)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div className="calendar-legend">
                 <span><i className="legend-common" /> Everyone is free</span>
-                <span><i className="legend-break" /> School break</span>
+                <span><i className="legend-break" /> Colored line = reported break</span>
+                <span><i className="legend-unknown" /> Dashed line = no break reported</span>
                 <span className="demo-warning">Demo dates—not official school data</span>
               </div>
             </div>
