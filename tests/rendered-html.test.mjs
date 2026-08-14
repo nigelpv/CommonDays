@@ -28,6 +28,7 @@ test("server-renders the Common Days prototype", async () => {
   assert.match(html, /Month calendar/);
   assert.match(html, /EVERYONE IS OFF/);
   assert.match(html, /Report a calendar issue/);
+  assert.doesNotMatch(html, /maximum reached/i);
   assert.doesNotMatch(html, /codex-preview/);
   assert.doesNotMatch(html, /react-loading-skeleton/);
 });
@@ -47,6 +48,10 @@ test("ships product metadata and interactive source", async () => {
   assert.match(page, /Correction request ready/);
   assert.match(page, /Nothing was sent or changed/);
   assert.match(page, /submitReport/);
+  assert.match(page, /MAX_SCREENSHOTS = 10/);
+  assert.match(page, /type="file"/);
+  assert.match(page, /multiple/);
+  assert.match(page, /10 screenshots added—maximum reached/);
   assert.match(layout, /og\.png/);
   assert.match(layout, /Common Days/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);

@@ -21,12 +21,20 @@ type School = {
   breaks: BreakEvent[];
 };
 
+type ScreenshotDraft = {
+  id: string;
+  name: string;
+  previewUrl: string;
+  signature: string;
+};
+
 type ViewMode = "year" | "winter" | "spring";
 type DisplayMode = "month" | "timeline";
 type AddStage = "search" | "available" | "missing" | "extracting" | "review" | "published";
 type ReportIssue = "wrong-dates" | "missing-break" | "extra-break" | "wrong-calendar" | "other";
 
 const DAY = 86_400_000;
+const MAX_SCREENSHOTS = 10;
 
 const demoSchools: School[] = [
   {
@@ -337,6 +345,8 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [candidateId, setCandidateId] = useState<string | null>(null);
   const [draftEvents, setDraftEvents] = useState(riceDraft);
+  const [screenshots, setScreenshots] = useState<ScreenshotDraft[]>([]);
+  const [screenshotError, setScreenshotError] = useState("");
   const [copied, setCopied] = useState(false);
   const [reportSchoolId, setReportSchoolId] = useState<string | null>(null);
   const [reportDate, setReportDate] = useState<string | null>(null);
@@ -347,6 +357,9 @@ export default function Home() {
   const [reportSubmitted, setReportSubmitted] = useState(false);
   const isReportOpen = reportSchoolId !== null;
   const searchRef = useRef<HTMLInputElement>(null);
+  const screenshotInputRef = useRef<HTMLInputElement>(null);
+  const uploadFullRef = useRef<HTMLDivElement>(null);
+  const screenshotUrlsRef = useRef<string[]>([]);
   const reportDetailsRef = useRef<HTMLTextAreaElement>(null);
   const reportCompleteRef = useRef<HTMLButtonElement>(null);
   const reportModalRef = useRef<HTMLElement>(null);
@@ -399,13 +412,29 @@ export default function Home() {
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeModal();
+      if (event.key !== "Escape") return;
+      screenshotUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      screenshotUrlsRef.current = [];
+      setScreenshots([]);
+      setScreenshotError("");
+      setAddOpen(false);
+      setStage("search");
+      setCandidateId(null);
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, []);
 
+  useEffect(() => () => {
+    screenshotUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+  }, []);
+
+  useEffect(() => {
+    if (screenshots.length === MAX_SCREENSHOTS) window.setTimeout(() => uploadFullRef.current?.focus(), 0);
+  }, [screenshots.length]);
+
   function openAdd() {
+    clearScreenshots();
     setReportSchoolId(null);
     setQuery("");
     setCandidateId(null);
@@ -414,13 +443,107 @@ export default function Home() {
   }
 
   function closeModal() {
+    clearScreenshots();
     setAddOpen(false);
     setStage("search");
     setCandidateId(null);
   }
 
+  function clearScreenshots() {
+    screenshotUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    screenshotUrlsRef.current = [];
+    setScreenshots([]);
+    setScreenshotError("");
+    if (screenshotInputRef.current) screenshotInputRef.current.value = "";
+  }
+
+  function addScreenshotFiles(fileList: FileList | File[]) {
+    const incoming = Array.from(fileList);
+    const images = incoming.filter((file) => file.type.startsWith("image/"));
+    if (!images.length) {
+      setScreenshotError("Choose screenshot image files such as PNG, JPG, or WEBP.");
+      return;
+    }
+
+    const knownSignatures = new Set(screenshots.map((screenshot) => screenshot.signature));
+    const uniqueImages = images.filter((file) => {
+      const signature = `${file.name}-${file.size}-${file.lastModified}`;
+      if (knownSignatures.has(signature)) return false;
+      knownSignatures.add(signature);
+      return true;
+    });
+    const remainingSlots = MAX_SCREENSHOTS - screenshots.length;
+    const accepted = uniqueImages.slice(0, remainingSlots).map((file, index) => {
+      const previewUrl = URL.createObjectURL(file);
+      screenshotUrlsRef.current.push(previewUrl);
+      return {
+        id: `${file.name}-${file.lastModified}-${file.size}-${Date.now()}-${index}`,
+        name: file.name,
+        previewUrl,
+        signature: `${file.name}-${file.size}-${file.lastModified}`,
+      };
+    });
+
+    setScreenshots((current) => [...current, ...accepted].slice(0, MAX_SCREENSHOTS));
+    const messages: string[] = [];
+    const invalidCount = incoming.length - images.length;
+    const duplicateCount = images.length - uniqueImages.length;
+    const overflowCount = uniqueImages.length - accepted.length;
+    if (invalidCount) messages.push(`${invalidCount} non-image ${invalidCount === 1 ? "file was" : "files were"} skipped.`);
+    if (duplicateCount) messages.push(`${duplicateCount} duplicate ${duplicateCount === 1 ? "was" : "were"} skipped.`);
+    if (overflowCount) {
+      messages.push(`Added ${accepted.length} ${accepted.length === 1 ? "screenshot" : "screenshots"}. ${overflowCount} ${overflowCount === 1 ? "wasn’t" : "weren’t"} added because this upload reached its 10-screenshot maximum.`);
+    }
+    setScreenshotError(messages.join(" "));
+  }
+
+  function removeScreenshot(id: string) {
+    const removed = screenshots.find((screenshot) => screenshot.id === id);
+    if (removed) {
+      URL.revokeObjectURL(removed.previewUrl);
+      screenshotUrlsRef.current = screenshotUrlsRef.current.filter((url) => url !== removed.previewUrl);
+    }
+    setScreenshots((current) => current.filter((screenshot) => screenshot.id !== id));
+    setScreenshotError("");
+  }
+
+  function chooseScreenshotFiles() {
+    if (screenshots.length < MAX_SCREENSHOTS) screenshotInputRef.current?.click();
+  }
+
+  function handleScreenshotInput(event: React.ChangeEvent<HTMLInputElement>) {
+    if (event.target.files) addScreenshotFiles(event.target.files);
+    event.target.value = "";
+  }
+
+  function handleScreenshotDrop(event: React.DragEvent<HTMLElement>) {
+    event.preventDefault();
+    if (screenshots.length < MAX_SCREENSHOTS) addScreenshotFiles(event.dataTransfer.files);
+  }
+
+  function handleScreenshotPaste(event: React.ClipboardEvent<HTMLDivElement>) {
+    const files = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter(Boolean) as File[];
+    if (!files.length || screenshots.length >= MAX_SCREENSHOTS) return;
+    event.preventDefault();
+    addScreenshotFiles(files);
+  }
+
+  function moveScreenshot(index: number, direction: -1 | 1) {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= screenshots.length) return;
+    setScreenshots((current) => {
+      const reordered = [...current];
+      [reordered[index], reordered[nextIndex]] = [reordered[nextIndex], reordered[index]];
+      return reordered;
+    });
+  }
+
   function openReport(schoolId: string, date: string | null = null) {
     reportTriggerRef.current = document.activeElement as HTMLElement | null;
+    clearScreenshots();
     setAddOpen(false);
     setReportSchoolId(schoolId);
     setReportDate(date);
@@ -827,7 +950,7 @@ export default function Home() {
           </article>
           <article>
             <span className="step-badge">2</span>
-            <div className="step-visual upload-visual"><span>↑</span><p>academic-calendar.pdf</p><b>4 BREAKS FOUND</b></div>
+            <div className="step-visual upload-visual"><span>↑</span><p>calendar-1.png + 2 more</p><b>4 BREAKS FOUND</b></div>
             <h3>Fill the gap once</h3>
             <p>If it&apos;s missing, one person uploads and confirms the extracted dates.</p>
           </article>
@@ -898,19 +1021,87 @@ export default function Home() {
             ) : null}
 
             {stage === "missing" && candidate ? (
-              <div className="modal-content result-stage">
+              <div
+                className="modal-content result-stage screenshot-stage"
+                onPaste={handleScreenshotPaste}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={handleScreenshotDrop}
+              >
                 <div className="big-status missing-big">＋</div>
                 <span className="modal-kicker missing-kicker">NOT IN THE LIBRARY YET</span>
                 <h2 id="modal-title">Be the first to add {candidate.shortName}.</h2>
-                <p>For this prototype, use our sample file. A real version would also accept PDFs, screenshots, spreadsheets, text, and .ics files.</p>
-                <button className="drop-zone" onClick={simulateUpload}>
-                  <span className="upload-arrow">↑</span>
-                  <strong>Drop an academic calendar here</strong>
-                  <small>or click to use a sample PDF</small>
-                  <b>PDF · IMAGE · XLSX · TEXT · ICS</b>
-                </button>
-                <div className="privacy-note"><span>⌁</span><p><strong>School-wide calendars only</strong><br />Don&apos;t upload a personal class schedule.</p></div>
-                <button className="modal-back" onClick={() => setStage("search")}>← Search another school</button>
+                <p>Upload screenshots of the school&apos;s official academic calendar. We&apos;ll read them together and pull out the no-class dates.</p>
+
+                <input
+                  className="screenshot-file-input"
+                  ref={screenshotInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  disabled={screenshots.length >= MAX_SCREENSHOTS}
+                  onChange={handleScreenshotInput}
+                  aria-label="Choose academic calendar screenshots"
+                />
+
+                {screenshots.length === 0 ? (
+                  <button
+                    className="drop-zone"
+                    type="button"
+                    onClick={chooseScreenshotFiles}
+                  >
+                    <span className="upload-arrow">↑</span>
+                    <strong>Drop screenshots here</strong>
+                    <small>or click to choose them · paste works too</small>
+                    <b>PNG · JPG · WEBP</b>
+                  </button>
+                ) : (
+                  <div className="screenshot-picker">
+                    <div className="screenshot-picker-heading">
+                      <div><span>UPLOAD READY</span><strong>{screenshots.length} {screenshots.length === 1 ? "screenshot" : "screenshots"} added</strong></div>
+                      {screenshots.length < MAX_SCREENSHOTS ? (
+                        <button type="button" onClick={chooseScreenshotFiles}>＋ Add screenshots</button>
+                      ) : null}
+                    </div>
+
+                    <ul className="screenshot-grid" aria-label="Selected screenshots in reading order">
+                      {screenshots.map((screenshot, index) => (
+                        <li key={screenshot.id}>
+                          <div className="screenshot-thumb">
+                            {/* Object URLs are local previews and should not go through an image optimizer. */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={screenshot.previewUrl} alt="" />
+                            <span>{index + 1}</span>
+                          </div>
+                          <div className="screenshot-file-copy">
+                            <b>SCREENSHOT {String(index + 1).padStart(2, "0")}</b>
+                            <small title={screenshot.name}>{screenshot.name}</small>
+                          </div>
+                          <div className="screenshot-actions">
+                            <button type="button" onClick={() => moveScreenshot(index, -1)} disabled={index === 0} aria-label={`Move ${screenshot.name} earlier`}>↑</button>
+                            <button type="button" onClick={() => moveScreenshot(index, 1)} disabled={index === screenshots.length - 1} aria-label={`Move ${screenshot.name} later`}>↓</button>
+                            <button className="remove-screenshot" type="button" onClick={() => removeScreenshot(screenshot.id)} aria-label={`Remove screenshot ${index + 1}, ${screenshot.name}`}>×</button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+
+                    {screenshots.length === MAX_SCREENSHOTS ? (
+                      <div className="screenshot-limit-note" role="status" aria-live="polite" tabIndex={-1} ref={uploadFullRef}>
+                        <span>!</span><p><strong>10 screenshots added—maximum reached.</strong><br />Remove one to add another.</p>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+
+                {screenshotError ? <div className="screenshot-error" role="alert">{screenshotError}</div> : null}
+                <div className="privacy-note"><span>⌁</span><p><strong>School-wide calendars only</strong><br />Don&apos;t upload a personal class schedule. In this demo, your selected images stay on this device.</p></div>
+                {screenshots.length > 0 ? (
+                  <>
+                    <button className="modal-primary screenshot-read-button" type="button" onClick={simulateUpload}>Read these screenshots <span>→</span></button>
+                    <button className="modal-back" type="button" onClick={clearScreenshots}>Clear selected screenshots</button>
+                  </>
+                ) : null}
+                <button className="modal-back" type="button" onClick={() => { clearScreenshots(); setStage("search"); }}>← Search another school</button>
               </div>
             ) : null}
 
@@ -921,7 +1112,7 @@ export default function Home() {
                   <span>ACADEMIC CALENDAR</span>
                   <b /><b /><b /><b />
                 </div>
-                <span className="modal-kicker">READING SAMPLE FILE</span>
+                <span className="modal-kicker">READING {screenshots.length} {screenshots.length === 1 ? "SCREENSHOT" : "SCREENSHOTS"}</span>
                 <h2 id="modal-title">Finding dates and breaks…</h2>
                 <p>This is simulated in the prototype.</p>
                 <div className="loading-track"><i /></div>
@@ -933,7 +1124,7 @@ export default function Home() {
                 <span className="modal-kicker">STEP 3 OF 3</span>
                 <h2 id="modal-title">Check what we found.</h2>
                 <p>Nothing becomes shared until a person confirms it.</p>
-                <div className="review-summary"><span>✓</span><strong>{draftEvents.length} no-class periods found</strong><small>From sample-academic-calendar.pdf</small></div>
+                <div className="review-summary"><span>✓</span><strong>{draftEvents.length} no-class periods found</strong><small>From {screenshots.length} uploaded {screenshots.length === 1 ? "screenshot" : "screenshots"}</small></div>
                 <div className="review-list">
                   {draftEvents.map((event) => (
                     <div className="review-row" key={event.id}>
