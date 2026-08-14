@@ -24,6 +24,7 @@ type School = {
 type ViewMode = "year" | "winter" | "spring";
 type DisplayMode = "month" | "timeline";
 type AddStage = "search" | "available" | "missing" | "extracting" | "review" | "published";
+type ReportIssue = "wrong-dates" | "missing-break" | "extra-break" | "wrong-calendar" | "other";
 
 const DAY = 86_400_000;
 
@@ -151,6 +152,14 @@ const academicMonths = [
 ];
 
 const weekdays = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+
+const reportOptions: { id: ReportIssue; title: string; description: string }[] = [
+  { id: "wrong-dates", title: "Wrong dates", description: "A break starts or ends on a different day." },
+  { id: "missing-break", title: "Missing break", description: "A holiday or no-class period is not shown." },
+  { id: "extra-break", title: "Break should not be here", description: "The calendar marks classes off when they are not." },
+  { id: "wrong-calendar", title: "Wrong calendar", description: "This is the wrong school, year, or calendar type." },
+  { id: "other", title: "Something else", description: "Anything that does not fit the choices above." },
+];
 
 function utc(iso: string) {
   return Date.parse(`${iso}T00:00:00Z`);
@@ -329,7 +338,19 @@ export default function Home() {
   const [candidateId, setCandidateId] = useState<string | null>(null);
   const [draftEvents, setDraftEvents] = useState(riceDraft);
   const [copied, setCopied] = useState(false);
+  const [reportSchoolId, setReportSchoolId] = useState<string | null>(null);
+  const [reportDate, setReportDate] = useState<string | null>(null);
+  const [reportIssue, setReportIssue] = useState<ReportIssue>("wrong-dates");
+  const [reportDetails, setReportDetails] = useState("");
+  const [reportSource, setReportSource] = useState("");
+  const [reportAcknowledged, setReportAcknowledged] = useState(false);
+  const [reportSubmitted, setReportSubmitted] = useState(false);
+  const isReportOpen = reportSchoolId !== null;
   const searchRef = useRef<HTMLInputElement>(null);
+  const reportDetailsRef = useRef<HTMLTextAreaElement>(null);
+  const reportCompleteRef = useRef<HTMLButtonElement>(null);
+  const reportModalRef = useRef<HTMLElement>(null);
+  const reportTriggerRef = useRef<HTMLElement | null>(null);
 
   const selectedSchools = useMemo(
     () => selectedIds.map((id) => schools.find((school) => school.id === id)).filter(Boolean) as School[],
@@ -357,6 +378,8 @@ export default function Home() {
   const selectedDayFreeCount = selectedDayEvents.filter((status) => status.event).length;
   const selectedDayEveryoneFree = selectedSchools.length >= 2 && selectedDayFreeCount === selectedSchools.length;
   const candidate = schools.find((school) => school.id === candidateId) ?? null;
+  const reportSchool = schools.find((school) => school.id === reportSchoolId) ?? null;
+  const reportEvent = reportSchool && reportDate ? eventOnDate(reportSchool, reportDate) : null;
   const searchResults = schools.filter((school) => {
     const haystack = `${school.name} ${school.shortName} ${school.location}`.toLowerCase();
     return haystack.includes(query.toLowerCase()) && !selectedIds.includes(school.id);
@@ -367,6 +390,14 @@ export default function Home() {
   }, [addOpen, stage]);
 
   useEffect(() => {
+    if (!isReportOpen) return;
+    window.setTimeout(() => {
+      if (reportSubmitted) reportCompleteRef.current?.focus();
+      else reportDetailsRef.current?.focus();
+    }, 80);
+  }, [isReportOpen, reportSubmitted]);
+
+  useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeModal();
     };
@@ -375,6 +406,7 @@ export default function Home() {
   }, []);
 
   function openAdd() {
+    setReportSchoolId(null);
     setQuery("");
     setCandidateId(null);
     setStage("search");
@@ -385,6 +417,56 @@ export default function Home() {
     setAddOpen(false);
     setStage("search");
     setCandidateId(null);
+  }
+
+  function openReport(schoolId: string, date: string | null = null) {
+    reportTriggerRef.current = document.activeElement as HTMLElement | null;
+    setAddOpen(false);
+    setReportSchoolId(schoolId);
+    setReportDate(date);
+    setReportIssue("wrong-dates");
+    setReportDetails("");
+    setReportSource("");
+    setReportAcknowledged(false);
+    setReportSubmitted(false);
+  }
+
+  function closeReport() {
+    setReportSchoolId(null);
+    setReportDate(null);
+    setReportSubmitted(false);
+    window.setTimeout(() => reportTriggerRef.current?.focus(), 0);
+  }
+
+  function submitReport(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!reportSchool || !reportDetails.trim() || !reportAcknowledged) return;
+    setReportSubmitted(true);
+  }
+
+  function handleReportDialogKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeReport();
+      return;
+    }
+    if (event.key !== "Tab" || !reportModalRef.current) return;
+    const focusable = Array.from(
+      reportModalRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   function chooseSchool(school: School) {
@@ -529,7 +611,17 @@ export default function Home() {
                   <div className="school-card" key={school.id}>
                     <span className="school-avatar" style={{ background: school.color }}>{school.initials}</span>
                     <span className="school-copy"><strong>{school.shortName}</strong><small>2026–27 · Available</small></span>
-                    <button onClick={() => removeSchool(school.id)} aria-label={`Remove ${school.shortName}`}>×</button>
+                    <span className="school-actions">
+                      <button
+                        className="school-report-button"
+                        type="button"
+                        onClick={() => openReport(school.id)}
+                        aria-label={`Report a calendar issue for ${school.shortName}`}
+                      >
+                        Report
+                      </button>
+                      <button className="school-remove-button" type="button" onClick={() => removeSchool(school.id)} aria-label={`Remove ${school.shortName}`}>×</button>
+                    </span>
                   </div>
                 ))}
               </div>
@@ -649,6 +741,13 @@ export default function Home() {
                             {event ? event.title : "No school-wide break reported"}
                           </i>
                           <b>{event ? "NO CLASSES" : "—"}</b>
+                          <button
+                            type="button"
+                            onClick={() => openReport(school.id, selectedDate)}
+                            aria-label={`Report a calendar issue for ${school.shortName} on ${formatFullDay(selectedDate)}`}
+                          >
+                            Report
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -704,6 +803,9 @@ export default function Home() {
                 <span><i className="legend-common" /> Everyone is free</span>
                 <span><i className="legend-break" /> Colored line = reported break</span>
                 <span><i className="legend-unknown" /> Dashed line = no break reported</span>
+                {selectedSchools[0] ? (
+                  <button type="button" onClick={() => openReport(selectedSchools[0].id)}>! Report a calendar issue</button>
+                ) : null}
                 <span className="demo-warning">Demo dates—not official school data</span>
               </div>
             </div>
@@ -862,6 +964,141 @@ export default function Home() {
                 <button className="modal-primary" onClick={closeModal}>See it in the comparison <span>→</span></button>
               </div>
             ) : null}
+          </section>
+        </div>
+      ) : null}
+
+      {reportSchool ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeReport(); }}>
+          <section
+            className="modal report-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="report-modal-title"
+            aria-describedby="report-modal-description"
+            ref={reportModalRef}
+            onKeyDown={handleReportDialogKeyDown}
+          >
+            <div className="modal-top report-modal-top">
+              <div className="report-modal-marker"><i>!</i><span>COMMUNITY CHECK</span></div>
+              <button className="modal-close" type="button" onClick={closeReport} aria-label="Close report dialog">×</button>
+            </div>
+
+            {!reportSubmitted ? (
+              <form className="modal-content report-stage" onSubmit={submitReport}>
+                <span className="modal-kicker report-kicker">REPORT A PROBLEM</span>
+                <h2 id="report-modal-title">Spot a bad date?</h2>
+                <p id="report-modal-description">Tell us what looks wrong. A report proposes a correction—it never overwrites the shared calendar.</p>
+
+                <label className="report-school-field">
+                  <span>CALENDAR TO REPORT</span>
+                  <select value={reportSchool.id} onChange={(event) => setReportSchoolId(event.target.value)}>
+                    {selectedSchools.map((school) => <option value={school.id} key={school.id}>{school.name}</option>)}
+                  </select>
+                </label>
+
+                <div className="report-context-card">
+                  <span className="school-avatar large-avatar" style={{ background: reportSchool.color }}>{reportSchool.initials}</span>
+                  <div>
+                    <strong>{reportSchool.name}</strong>
+                    <small>Undergraduate calendar · 2026–2027 · Sample source</small>
+                  </div>
+                  <b>{reportDate ? formatDay(reportDate) : "FULL CALENDAR"}</b>
+                  {reportDate ? (
+                    <p><span>CURRENT</span>{reportEvent ? `${reportEvent.title} · ${formatDay(reportEvent.start)}–${formatDay(reportEvent.end)}` : "No school-wide break reported on this date"}</p>
+                  ) : null}
+                </div>
+
+                <fieldset className="report-options">
+                  <legend>WHAT LOOKS WRONG?</legend>
+                  <div>
+                    {reportOptions.map((option) => (
+                      <label className="report-option" key={option.id}>
+                        <input
+                          type="radio"
+                          name="report-issue"
+                          value={option.id}
+                          checked={reportIssue === option.id}
+                          onChange={() => setReportIssue(option.id)}
+                        />
+                        <span><b>{option.title}</b><small>{option.description}</small></span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+
+                <label className="report-text-field">
+                  <span>WHAT SHOULD IT SAY INSTEAD? <b>REQUIRED</b></span>
+                  <textarea
+                    ref={reportDetailsRef}
+                    value={reportDetails}
+                    onChange={(event) => setReportDetails(event.target.value)}
+                    maxLength={500}
+                    rows={4}
+                    required
+                    placeholder="Example: Winter break starts December 20, not December 22."
+                  />
+                  <small>{reportDetails.length}/500</small>
+                </label>
+
+                <label className="report-text-field">
+                  <span>OFFICIAL SOURCE LINK <i>OPTIONAL</i></span>
+                  <input
+                    type="url"
+                    value={reportSource}
+                    onChange={(event) => setReportSource(event.target.value)}
+                    placeholder="https://registrar.school.edu/calendar"
+                  />
+                </label>
+
+                <label className="report-confirm-check">
+                  <input
+                    type="checkbox"
+                    checked={reportAcknowledged}
+                    onChange={(event) => setReportAcknowledged(event.target.checked)}
+                    required
+                  />
+                  <span>This is about a school-wide academic calendar, not my personal class schedule.</span>
+                </label>
+
+                <div className="report-review-note">
+                  <span>⌁</span>
+                  <p><strong>The current calendar stays live.</strong><br />A real reviewer would verify the source before publishing a corrected version.</p>
+                </div>
+
+                <button className="modal-primary report-primary" type="submit" disabled={!reportDetails.trim() || !reportAcknowledged}>
+                  Prepare demo report <span>→</span>
+                </button>
+              </form>
+            ) : (
+              <div className="modal-content report-complete-stage" role="status" aria-live="polite">
+                <div className="report-complete-icon">!</div>
+                <span className="modal-kicker report-kicker">DEMO ONLY</span>
+                <h2 id="report-modal-title">Correction request ready.</h2>
+                <p id="report-modal-description">Nothing was sent or changed. In the real product, a reviewer would verify the correction against an official source before publishing a new version.</p>
+                <div className="report-ready-card">
+                  <span className="school-avatar large-avatar" style={{ background: reportSchool.color }}>{reportSchool.initials}</span>
+                  <div>
+                    <strong>{reportSchool.shortName} · 2026–27</strong>
+                    <small>{reportOptions.find((option) => option.id === reportIssue)?.title}</small>
+                  </div>
+                  <b>CURRENT CALENDAR UNCHANGED</b>
+                </div>
+                <button className="modal-primary report-primary" type="button" onClick={closeReport} ref={reportCompleteRef}>Back to calendar <span>→</span></button>
+                <button
+                  className="modal-back"
+                  type="button"
+                  onClick={() => {
+                    setReportSubmitted(false);
+                    setReportDetails("");
+                    setReportSource("");
+                    setReportAcknowledged(false);
+                  }}
+                >
+                  Report another issue
+                </button>
+              </div>
+            )}
           </section>
         </div>
       ) : null}
