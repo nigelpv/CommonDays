@@ -694,7 +694,7 @@ export default function Home() {
               <h1>Upload once.<br /><em>Everyone reuses it.</em></h1>
             </div>
             <p>
-              The first student for a school and academic year uploads screenshots or the official PDF. AI extracts the important dates, a person verifies them, and Common Days stores that reviewed calendar under the school and year, so nobody else has to upload it again.
+              The first student for a school and academic year uploads screenshots or the official PDF. AI extracts the important dates, and Common Days stores that calendar under the school and year, so nobody else has to upload it again. If someone finds a mistake in an academic calendar, they can report it, and it will be verified and fixed.
             </p>
           </div>
 
@@ -715,7 +715,7 @@ export default function Home() {
               <span className="flow-step">3</span>
               <i>✓</i>
               <strong>That year becomes reusable</strong>
-              <p>The next student selects their school and uses it instantly.</p>
+              <p>The next student selects their school and uses it instantly. Found a mistake? Report it so it can be verified and fixed.</p>
             </li>
           </ol>
 

@@ -28,6 +28,8 @@ test("server-renders the Common Days prototype", async () => {
   assert.match(html, /academic calendar for 20XX-XY for XYZ school/);
   assert.match(html, /AI parses the images/);
   assert.match(html, /That year becomes reusable/);
+  assert.match(html, /report it, and it will be verified and fixed/i);
+  assert.match(html, /Found a mistake\? Report it/i);
   assert.match(html, /UIUC/);
   assert.match(html, /SAMPLE DATA/);
   assert.match(html, /December 2026/);
