@@ -694,7 +694,7 @@ export default function Home() {
               <h1>Upload once.<br /><em>Everyone reuses it.</em></h1>
             </div>
             <p>
-              The first student for a school and academic year uploads screenshots or the official PDF. AI extracts the important dates, a person verifies them, and Common Days stores that reviewed calendar under the school and year—so nobody else has to upload it again.
+              The first student for a school and academic year uploads screenshots or the official PDF. AI extracts the important dates, a person verifies them, and Common Days stores that reviewed calendar under the school and year, so nobody else has to upload it again.
             </p>
           </div>
 
@@ -702,14 +702,14 @@ export default function Home() {
             <li className="flow-upload">
               <span className="flow-step">1</span>
               <i>↑</i>
-              <strong>Upload multiple screenshots—or one PDF</strong>
-              <p>One student submits every page of the school&apos;s academic calendar.</p>
+              <strong>Upload multiple screenshots or one PDF</strong>
+              <p>One student submits the academic calendar for 20XX-XY for XYZ school.</p>
             </li>
             <li className="flow-extract">
               <span className="flow-step">2</span>
               <i>✦</i>
               <strong>AI parses the images</strong>
-              <p>It reads each screenshot—or the PDF—then extracts the breaks, holidays, and no-class dates for a person to check.</p>
+              <p>It reads each screenshot or the PDF, then extracts the breaks, holidays, and no-class dates for a person to check.</p>
             </li>
             <li className="flow-reuse">
               <span className="flow-step">3</span>
@@ -723,7 +723,7 @@ export default function Home() {
             <span>NEXT STUDENT</span><i aria-hidden="true">→</i>
             <span>SEARCH SCHOOL</span><i aria-hidden="true">→</i>
             <span>CALENDAR AVAILABLE</span><i aria-hidden="true">→</i>
-            <strong>USE IT—NO UPLOAD</strong>
+            <strong>USE IT, NO UPLOAD</strong>
           </div>
         </div>
 
