@@ -21,7 +21,7 @@ test("server-renders the Common Days prototype", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Common Days/i);
-  assert.match(html, /Find the break/);
+  assert.match(html, /When is everyone free/);
   assert.match(html, /UIUC/);
   assert.match(html, /SAMPLE DATA/);
   assert.match(html, /December 2026/);
@@ -29,6 +29,9 @@ test("server-renders the Common Days prototype", async () => {
   assert.match(html, /EVERYONE IS OFF/);
   assert.match(html, /Report a calendar issue/);
   assert.doesNotMatch(html, /maximum reached/i);
+  assert.doesNotMatch(html, /Your group.s calendar/i);
+  assert.doesNotMatch(html, /class="site-header"/);
+  assert.doesNotMatch(html, /class="hero"/);
   assert.doesNotMatch(html, /codex-preview/);
   assert.doesNotMatch(html, /react-loading-skeleton/);
 });

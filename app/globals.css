@@ -390,7 +390,7 @@ a {
 .planner-section {
   background: var(--ink);
   color: var(--white);
-  padding: 92px max(32px, calc((100vw - 1360px) / 2)) 110px;
+  padding: 28px max(32px, calc((100vw - 1360px) / 2)) 96px;
   position: relative;
   overflow: hidden;
 }

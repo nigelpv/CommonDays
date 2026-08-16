@@ -650,60 +650,7 @@ export default function Home() {
 
   return (
     <main>
-      <header className="site-header">
-        <a className="brand" href="#top" aria-label="Common Days home">
-          <Mark />
-          <span>COMMON DAYS</span>
-        </a>
-        <nav aria-label="Primary navigation">
-          <a href="#planner">Demo</a>
-          <a href="#how-it-works">How it works</a>
-        </nav>
-        <button className="header-button" onClick={openAdd}>Add a school <span>＋</span></button>
-      </header>
-
-      <section className="hero" id="top">
-        <div className="hero-copy">
-          <div className="eyebrow"><span>●</span> Proof of concept · sample dates</div>
-          <h1>Find the break<br />everyone <em>actually</em> shares.</h1>
-          <p>
-            Pick your friends&apos; schools. We&apos;ll stack their academic calendars and show the days that line up—without making the next UIUC student upload the same calendar again.
-          </p>
-          <div className="hero-actions">
-            <button className="primary-button" onClick={() => document.getElementById("planner")?.scrollIntoView({ behavior: "smooth" })}>
-              Explore the demo <span>↓</span>
-            </button>
-            <button className="text-button" onClick={() => { openAdd(); setQuery("Rice"); }}>
-              Try a missing school <span>↗</span>
-            </button>
-          </div>
-        </div>
-        <div className="hero-visual" aria-hidden="true">
-          <div className="orbit orbit-one" />
-          <div className="orbit orbit-two" />
-          <div className="mini-calendar">
-            <div className="mini-top"><span>DEC 2026</span><b>3 schools</b></div>
-            <div className="mini-dates"><span>18</span><span>19</span><span>20</span><span>21</span><strong>22</strong><strong>23</strong><strong>24</strong><span>25</span></div>
-            <div className="mini-row"><i style={{ background: "#5968f2", width: "88%" }} /></div>
-            <div className="mini-row"><i style={{ background: "#ff735f", width: "79%", marginLeft: "9%" }} /></div>
-            <div className="mini-row"><i style={{ background: "#1fae9e", width: "70%", marginLeft: "18%" }} /></div>
-            <div className="mini-highlight"><span>ALL FREE</span><b>27 DAYS</b></div>
-          </div>
-          <div className="hero-note note-one"><span>✓</span> UIUC calendar already here</div>
-          <div className="hero-note note-two"><span>3</span> calendars compared</div>
-        </div>
-      </section>
-
       <section className="planner-section" id="planner">
-        <div className="section-heading">
-          <div>
-            <span className="section-number">01</span>
-            <p>LIVE PROTOTYPE</p>
-          </div>
-          <h2>Your group&apos;s calendar,<br />finally in one place.</h2>
-          <p className="section-note">Click around. Remove a school, add Georgia Tech, or try Rice to see the missing-calendar flow.</p>
-        </div>
-
         <div className="app-window">
           <div className="app-toolbar">
             <div className="window-dots"><i /><i /><i /></div>
@@ -938,7 +885,7 @@ export default function Home() {
 
       <section className="how-section" id="how-it-works">
         <div className="how-heading">
-          <span className="section-number">02</span>
+          <span className="section-number">01</span>
           <h2>Upload once.<br />Useful for everyone.</h2>
         </div>
         <div className="how-grid">
@@ -964,7 +911,7 @@ export default function Home() {
       </section>
 
       <footer>
-        <a className="brand footer-brand" href="#top"><Mark /><span>COMMON DAYS</span></a>
+        <a className="brand footer-brand" href="#planner"><Mark /><span>COMMON DAYS</span></a>
         <p>A proof of concept for finding time together.</p>
         <button onClick={() => document.getElementById("planner")?.scrollIntoView({ behavior: "smooth" })}>Back to demo ↑</button>
       </footer>
