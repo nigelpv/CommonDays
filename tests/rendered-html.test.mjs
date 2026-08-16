@@ -22,6 +22,9 @@ test("server-renders the Common Days prototype", async () => {
   const html = await response.text();
   assert.match(html, /<title>Common Days/i);
   assert.match(html, /When is everyone free/);
+  assert.match(html, /Upload once/);
+  assert.match(html, /Everyone reuses it/);
+  assert.match(html, /That year becomes reusable/);
   assert.match(html, /UIUC/);
   assert.match(html, /SAMPLE DATA/);
   assert.match(html, /December 2026/);
@@ -32,6 +35,8 @@ test("server-renders the Common Days prototype", async () => {
   assert.doesNotMatch(html, /Your group.s calendar/i);
   assert.doesNotMatch(html, /class="site-header"/);
   assert.doesNotMatch(html, /class="hero"/);
+  assert.doesNotMatch(html, /class="how-section"/);
+  assert.doesNotMatch(html, /<footer>/);
   assert.doesNotMatch(html, /codex-preview/);
   assert.doesNotMatch(html, /react-loading-skeleton/);
 });
@@ -54,6 +59,7 @@ test("ships product metadata and interactive source", async () => {
   assert.match(page, /MAX_SCREENSHOTS = 10/);
   assert.match(page, /type="file"/);
   assert.match(page, /multiple/);
+  assert.match(page, /application\/pdf/);
   assert.match(page, /10 screenshots added—maximum reached/);
   assert.match(layout, /og\.png/);
   assert.match(layout, /Common Days/);

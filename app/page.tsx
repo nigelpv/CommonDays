@@ -28,6 +28,11 @@ type ScreenshotDraft = {
   signature: string;
 };
 
+type PdfDraft = {
+  name: string;
+  signature: string;
+};
+
 type ViewMode = "year" | "winter" | "spring";
 type DisplayMode = "month" | "timeline";
 type AddStage = "search" | "available" | "missing" | "extracting" | "review" | "published";
@@ -346,6 +351,7 @@ export default function Home() {
   const [candidateId, setCandidateId] = useState<string | null>(null);
   const [draftEvents, setDraftEvents] = useState(riceDraft);
   const [screenshots, setScreenshots] = useState<ScreenshotDraft[]>([]);
+  const [pdfDraft, setPdfDraft] = useState<PdfDraft | null>(null);
   const [screenshotError, setScreenshotError] = useState("");
   const [copied, setCopied] = useState(false);
   const [reportSchoolId, setReportSchoolId] = useState<string | null>(null);
@@ -416,6 +422,7 @@ export default function Home() {
       screenshotUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       screenshotUrlsRef.current = [];
       setScreenshots([]);
+      setPdfDraft(null);
       setScreenshotError("");
       setAddOpen(false);
       setStage("search");
@@ -453,6 +460,7 @@ export default function Home() {
     screenshotUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     screenshotUrlsRef.current = [];
     setScreenshots([]);
+    setPdfDraft(null);
     setScreenshotError("");
     if (screenshotInputRef.current) screenshotInputRef.current.value = "";
   }
@@ -460,8 +468,31 @@ export default function Home() {
   function addScreenshotFiles(fileList: FileList | File[]) {
     const incoming = Array.from(fileList);
     const images = incoming.filter((file) => file.type.startsWith("image/"));
+    const pdfs = incoming.filter((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
+
+    if (images.length && pdfs.length) {
+      setScreenshotError("Choose either screenshots or one PDF for this calendar, not both together.");
+      return;
+    }
+
+    if (pdfs.length) {
+      if (screenshots.length) {
+        setScreenshotError("Remove the selected screenshots before choosing a PDF.");
+        return;
+      }
+      const pdf = pdfs[0];
+      setPdfDraft({ name: pdf.name, signature: `${pdf.name}-${pdf.size}-${pdf.lastModified}` });
+      setScreenshotError(pdfs.length > 1 ? "The first PDF was added. Use one official calendar PDF at a time." : "");
+      return;
+    }
+
+    if (pdfDraft && images.length) {
+      setScreenshotError("Remove the selected PDF before choosing screenshots.");
+      return;
+    }
+
     if (!images.length) {
-      setScreenshotError("Choose screenshot image files such as PNG, JPG, or WEBP.");
+      setScreenshotError("Choose screenshot images or an academic calendar PDF.");
       return;
     }
 
@@ -508,7 +539,7 @@ export default function Home() {
   }
 
   function chooseScreenshotFiles() {
-    if (screenshots.length < MAX_SCREENSHOTS) screenshotInputRef.current?.click();
+    if (!pdfDraft && screenshots.length < MAX_SCREENSHOTS) screenshotInputRef.current?.click();
   }
 
   function handleScreenshotInput(event: React.ChangeEvent<HTMLInputElement>) {
@@ -518,7 +549,7 @@ export default function Home() {
 
   function handleScreenshotDrop(event: React.DragEvent<HTMLElement>) {
     event.preventDefault();
-    if (screenshots.length < MAX_SCREENSHOTS) addScreenshotFiles(event.dataTransfer.files);
+    if (!pdfDraft && screenshots.length < MAX_SCREENSHOTS) addScreenshotFiles(event.dataTransfer.files);
   }
 
   function handleScreenshotPaste(event: React.ClipboardEvent<HTMLDivElement>) {
@@ -526,7 +557,7 @@ export default function Home() {
       .filter((item) => item.kind === "file")
       .map((item) => item.getAsFile())
       .filter(Boolean) as File[];
-    if (!files.length || screenshots.length >= MAX_SCREENSHOTS) return;
+    if (!files.length || pdfDraft || screenshots.length >= MAX_SCREENSHOTS) return;
     event.preventDefault();
     addScreenshotFiles(files);
   }
@@ -651,6 +682,51 @@ export default function Home() {
   return (
     <main>
       <section className="planner-section" id="planner">
+        <div className="system-intro">
+          <div className="system-intro-top">
+            <a className="brand" href="#planner" aria-label="Common Days home"><Mark /><span>COMMON DAYS</span></a>
+            <span className="shared-calendar-pill">ONE SCHOOL · ONE YEAR · ONE SHARED CALENDAR</span>
+          </div>
+
+          <div className="system-intro-heading">
+            <div>
+              <span>HOW THE LIBRARY GROWS</span>
+              <h1>Upload once.<br /><em>Everyone reuses it.</em></h1>
+            </div>
+            <p>
+              The first student for a school and academic year uploads screenshots or the official PDF. AI extracts the important dates, a person verifies them, and Common Days stores that reviewed calendar under the school and year—so nobody else has to upload it again.
+            </p>
+          </div>
+
+          <ol className="system-flow" aria-label="How a school calendar becomes reusable">
+            <li className="flow-upload">
+              <span className="flow-step">1</span>
+              <i>↑</i>
+              <strong>One student uploads</strong>
+              <p>Screenshots or the school&apos;s official calendar PDF.</p>
+            </li>
+            <li className="flow-extract">
+              <span className="flow-step">2</span>
+              <i>✦</i>
+              <strong>AI extracts. A person checks.</strong>
+              <p>Breaks, holidays, and no-class dates are reviewed before sharing.</p>
+            </li>
+            <li className="flow-reuse">
+              <span className="flow-step">3</span>
+              <i>✓</i>
+              <strong>That year becomes reusable</strong>
+              <p>The next student selects their school and uses it instantly.</p>
+            </li>
+          </ol>
+
+          <div className="reuse-strip" aria-label="The next student searches their school, finds the calendar available, and uses it without uploading">
+            <span>NEXT STUDENT</span><i aria-hidden="true">→</i>
+            <span>SEARCH SCHOOL</span><i aria-hidden="true">→</i>
+            <span>CALENDAR AVAILABLE</span><i aria-hidden="true">→</i>
+            <strong>USE IT—NO UPLOAD</strong>
+          </div>
+        </div>
+
         <div className="app-window">
           <div className="app-toolbar">
             <div className="window-dots"><i /><i /><i /></div>
@@ -883,39 +959,6 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="how-section" id="how-it-works">
-        <div className="how-heading">
-          <span className="section-number">01</span>
-          <h2>Upload once.<br />Useful for everyone.</h2>
-        </div>
-        <div className="how-grid">
-          <article>
-            <span className="step-badge">1</span>
-            <div className="step-visual search-visual"><span>⌕</span><p>UIUC</p><b>AVAILABLE</b></div>
-            <h3>Check before uploading</h3>
-            <p>Choose a school, calendar type, and year. If it already exists, use it instantly.</p>
-          </article>
-          <article>
-            <span className="step-badge">2</span>
-            <div className="step-visual upload-visual"><span>↑</span><p>calendar-1.png + 2 more</p><b>4 BREAKS FOUND</b></div>
-            <h3>Fill the gap once</h3>
-            <p>If it&apos;s missing, one person uploads and confirms the extracted dates.</p>
-          </article>
-          <article>
-            <span className="step-badge">3</span>
-            <div className="step-visual reuse-visual"><span>✓</span><p>Published for 2026–27</p><b>READY TO REUSE</b></div>
-            <h3>Share the canonical version</h3>
-            <p>Future students attach the reviewed calendar instead of creating another copy.</p>
-          </article>
-        </div>
-      </section>
-
-      <footer>
-        <a className="brand footer-brand" href="#planner"><Mark /><span>COMMON DAYS</span></a>
-        <p>A proof of concept for finding time together.</p>
-        <button onClick={() => document.getElementById("planner")?.scrollIntoView({ behavior: "smooth" })}>Back to demo ↑</button>
-      </footer>
-
       {addOpen ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }}>
           <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
@@ -977,29 +1020,35 @@ export default function Home() {
                 <div className="big-status missing-big">＋</div>
                 <span className="modal-kicker missing-kicker">NOT IN THE LIBRARY YET</span>
                 <h2 id="modal-title">Be the first to add {candidate.shortName}.</h2>
-                <p>Upload screenshots of the school&apos;s official academic calendar. We&apos;ll read them together and pull out the no-class dates.</p>
+                <p>Upload screenshots or the school&apos;s official academic calendar PDF. We&apos;ll pull out the no-class dates and let you check them.</p>
 
                 <input
                   className="screenshot-file-input"
                   ref={screenshotInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,application/pdf"
                   multiple
-                  disabled={screenshots.length >= MAX_SCREENSHOTS}
+                  disabled={Boolean(pdfDraft) || screenshots.length >= MAX_SCREENSHOTS}
                   onChange={handleScreenshotInput}
-                  aria-label="Choose academic calendar screenshots"
+                  aria-label="Choose academic calendar screenshots or a PDF"
                 />
 
-                {screenshots.length === 0 ? (
+                {pdfDraft ? (
+                  <div className="pdf-picker-card">
+                    <span>PDF</span>
+                    <div><strong>OFFICIAL CALENDAR PDF</strong><small title={pdfDraft.name}>{pdfDraft.name}</small></div>
+                    <button type="button" onClick={clearScreenshots} aria-label={`Remove ${pdfDraft.name}`}>×</button>
+                  </div>
+                ) : screenshots.length === 0 ? (
                   <button
                     className="drop-zone"
                     type="button"
                     onClick={chooseScreenshotFiles}
                   >
                     <span className="upload-arrow">↑</span>
-                    <strong>Drop screenshots here</strong>
-                    <small>or click to choose them · paste works too</small>
-                    <b>PNG · JPG · WEBP</b>
+                    <strong>Drop screenshots or a PDF here</strong>
+                    <small>or click to choose · image paste works too</small>
+                    <b>PNG · JPG · WEBP · PDF</b>
                   </button>
                 ) : (
                   <div className="screenshot-picker">
@@ -1042,10 +1091,10 @@ export default function Home() {
 
                 {screenshotError ? <div className="screenshot-error" role="alert">{screenshotError}</div> : null}
                 <div className="privacy-note"><span>⌁</span><p><strong>School-wide calendars only</strong><br />Don&apos;t upload a personal class schedule. In this demo, your selected images stay on this device.</p></div>
-                {screenshots.length > 0 ? (
+                {screenshots.length > 0 || pdfDraft ? (
                   <>
-                    <button className="modal-primary screenshot-read-button" type="button" onClick={simulateUpload}>Read these screenshots <span>→</span></button>
-                    <button className="modal-back" type="button" onClick={clearScreenshots}>Clear selected screenshots</button>
+                    <button className="modal-primary screenshot-read-button" type="button" onClick={simulateUpload}>{pdfDraft ? "Read this PDF" : "Read these screenshots"} <span>→</span></button>
+                    <button className="modal-back" type="button" onClick={clearScreenshots}>Clear selected {pdfDraft ? "PDF" : "screenshots"}</button>
                   </>
                 ) : null}
                 <button className="modal-back" type="button" onClick={() => { clearScreenshots(); setStage("search"); }}>← Search another school</button>
@@ -1059,7 +1108,7 @@ export default function Home() {
                   <span>ACADEMIC CALENDAR</span>
                   <b /><b /><b /><b />
                 </div>
-                <span className="modal-kicker">READING {screenshots.length} {screenshots.length === 1 ? "SCREENSHOT" : "SCREENSHOTS"}</span>
+                <span className="modal-kicker">{pdfDraft ? "READING OFFICIAL PDF" : `READING ${screenshots.length} ${screenshots.length === 1 ? "SCREENSHOT" : "SCREENSHOTS"}`}</span>
                 <h2 id="modal-title">Finding dates and breaks…</h2>
                 <p>This is simulated in the prototype.</p>
                 <div className="loading-track"><i /></div>
@@ -1071,7 +1120,7 @@ export default function Home() {
                 <span className="modal-kicker">STEP 3 OF 3</span>
                 <h2 id="modal-title">Check what we found.</h2>
                 <p>Nothing becomes shared until a person confirms it.</p>
-                <div className="review-summary"><span>✓</span><strong>{draftEvents.length} no-class periods found</strong><small>From {screenshots.length} uploaded {screenshots.length === 1 ? "screenshot" : "screenshots"}</small></div>
+                <div className="review-summary"><span>✓</span><strong>{draftEvents.length} no-class periods found</strong><small>{pdfDraft ? `From ${pdfDraft.name}` : `From ${screenshots.length} uploaded ${screenshots.length === 1 ? "screenshot" : "screenshots"}`}</small></div>
                 <div className="review-list">
                   {draftEvents.map((event) => (
                     <div className="review-row" key={event.id}>
