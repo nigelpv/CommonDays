@@ -24,6 +24,8 @@ test("server-renders the Common Days prototype", async () => {
   assert.match(html, /When is everyone free/);
   assert.match(html, /Upload once/);
   assert.match(html, /Everyone reuses it/);
+  assert.match(html, /Upload multiple screenshots/);
+  assert.match(html, /AI parses the images/);
   assert.match(html, /That year becomes reusable/);
   assert.match(html, /UIUC/);
   assert.match(html, /SAMPLE DATA/);
