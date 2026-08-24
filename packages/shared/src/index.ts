@@ -44,6 +44,62 @@ export const CalendarReportSchema = z.object({
   details: z.string().trim().min(10).max(1000),
 });
 
+export const AdminReportStatusSchema = z.enum([
+  "submitted",
+  "reviewing",
+  "resolved",
+  "rejected",
+]);
+
+export const AdminReportSchema = z.object({
+  id: z.string().min(1),
+  calendarId: z.string().min(1),
+  schoolId: z.string().min(1),
+  schoolName: z.string().min(1),
+  schoolShortName: z.string().min(1),
+  academicYear: AcademicYearSchema,
+  eventId: z.string().min(1).nullable(),
+  eventName: z.string().min(1).nullable(),
+  eventStartDate: z.string().date().nullable(),
+  eventEndDate: z.string().date().nullable(),
+  reason: CalendarReportSchema.shape.reason,
+  details: z.string().min(1),
+  status: AdminReportStatusSchema,
+  createdAt: z.string().datetime(),
+  resolutionNotes: z.string().nullable(),
+  resolvedAt: z.string().datetime().nullable(),
+}).strict();
+
+export const AdminReportsResponseSchema = z.object({
+  reports: z.array(AdminReportSchema),
+}).strict();
+
+export const AdminReportListResponseSchema = AdminReportsResponseSchema;
+
+export const AdminIdentitySchema = z.object({
+  id: z.string().min(1),
+  email: z.string().email().nullable(),
+}).strict();
+
+export const AdminMeResponseSchema = z.object({
+  admin: AdminIdentitySchema,
+}).strict();
+
+export const AdminSessionResponseSchema = AdminMeResponseSchema;
+
+export const AdminReportActionSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("start_review") }).strict(),
+  z.object({
+    action: z.literal("reject"),
+    resolutionNotes: z.string().trim().min(3).max(1000),
+  }).strict(),
+]);
+
+export const AdminReportResponseSchema = z.object({
+  report: AdminReportSchema,
+  message: z.string().min(1).optional(),
+}).strict();
+
 const CalendarAvailabilityBaseSchema = z.object({
   schoolId: z.string().min(1),
   academicYear: AcademicYearSchema,
@@ -86,6 +142,15 @@ export type School = z.infer<typeof SchoolSchema>;
 export type CalendarEvent = z.infer<typeof CalendarEventSchema>;
 export type CalendarComparison = z.infer<typeof CalendarComparisonSchema>;
 export type CalendarReport = z.infer<typeof CalendarReportSchema>;
+export type AdminReportStatus = z.infer<typeof AdminReportStatusSchema>;
+export type AdminReport = z.infer<typeof AdminReportSchema>;
+export type AdminReportsResponse = z.infer<typeof AdminReportsResponseSchema>;
+export type AdminReportListResponse = AdminReportsResponse;
+export type AdminIdentity = z.infer<typeof AdminIdentitySchema>;
+export type AdminMeResponse = z.infer<typeof AdminMeResponseSchema>;
+export type AdminSessionResponse = AdminMeResponse;
+export type AdminReportAction = z.infer<typeof AdminReportActionSchema>;
+export type AdminReportResponse = z.infer<typeof AdminReportResponseSchema>;
 export type CalendarAvailability = z.infer<typeof CalendarAvailabilitySchema>;
 export type CalendarSubmissionRequest = z.infer<typeof CalendarSubmissionRequestSchema>;
 export type CalendarSubmission = z.infer<typeof CalendarSubmissionSchema>;

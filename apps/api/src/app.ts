@@ -1,4 +1,9 @@
 import {
+  AdminMeResponseSchema,
+  AdminReportActionSchema,
+  AdminReportResponseSchema,
+  AdminReportsResponseSchema,
+  AdminReportStatusSchema,
   AcademicYearSchema,
   CALENDAR_UPLOAD_IMAGE_TYPES,
   CALENDAR_UPLOAD_MAX_FILE_BYTES,
@@ -6,11 +11,18 @@ import {
   CALENDAR_UPLOAD_MAX_TOTAL_BYTES,
   CalendarReportSchema,
   CalendarSubmissionRequestSchema,
+  type AdminIdentity,
 } from "@commondays/shared";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import {
+  createAdminTokenVerifier,
+  type AdminTokenVerifier,
+} from "./auth/admin-auth.js";
+import {
+  AdminReportNotFoundError,
+  AdminReportTransitionError,
   CalendarNotFoundError,
   CalendarAlreadyAvailableError,
   CalendarSubmissionNotFoundError,
@@ -24,6 +36,54 @@ import {
 } from "./repositories/calendar-repository.js";
 
 const acceptedImageTypes = new Set<string>(CALENDAR_UPLOAD_IMAGE_TYPES);
+type AppEnvironment = {
+  Variables: {
+    adminUser: AdminIdentity;
+  };
+};
+
+type AppOptions = {
+  adminTokenVerifier?: AdminTokenVerifier | null;
+  corsOrigins?: string[];
+};
+
+function normalizeCorsOrigin(origin: string) {
+  const trimmedOrigin = origin.trim();
+  if (!trimmedOrigin || trimmedOrigin === "*") {
+    throw new Error("CORS origins must be explicit HTTP or HTTPS origins.");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmedOrigin);
+  } catch {
+    throw new Error(`Invalid CORS origin: ${trimmedOrigin}`);
+  }
+
+  if (
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== "/" ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error(`Invalid CORS origin: ${trimmedOrigin}`);
+  }
+  return parsed.origin;
+}
+
+export function resolveCorsOrigins(explicitOrigins?: string[]) {
+  const configuredOrigins = explicitOrigins ?? (
+    process.env.CORS_ALLOWED_ORIGINS === undefined
+      ? process.env.NODE_ENV === "production"
+        ? []
+        : ["http://localhost:5173"]
+      : process.env.CORS_ALLOWED_ORIGINS.split(",")
+  );
+  return [...new Set(configuredOrigins.map(normalizeCorsOrigin))];
+}
+
 const calendarUploadBodyLimit = bodyLimit({
   maxSize: CALENDAR_UPLOAD_MAX_TOTAL_BYTES + 1024 * 1024,
   onError: (context) =>
@@ -61,14 +121,115 @@ function contentMatchesMimeType(file: CalendarUploadFile) {
   return false;
 }
 
-export function createApp(repository: CalendarRepository = createCalendarRepository()) {
-  const app = new Hono();
+export function createApp(
+  repository: CalendarRepository = createCalendarRepository(),
+  options: AppOptions = {},
+) {
+  const app = new Hono<AppEnvironment>();
+  const adminTokenVerifier = "adminTokenVerifier" in options
+    ? options.adminTokenVerifier ?? null
+    : createAdminTokenVerifier();
+  const corsOrigins = resolveCorsOrigins(options.corsOrigins);
 
-  app.use("/api/*", cors({ origin: ["http://localhost:5173"] }));
+  app.use("/api/*", cors({
+    origin: corsOrigins,
+    allowHeaders: ["Authorization", "Content-Type"],
+    allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
+  }));
 
   app.get("/health", (context) =>
     context.json({ status: "ok", service: "common-days-api", dataSource: repository.source }),
   );
+
+  app.use("/api/v1/admin/*", async (context, next) => {
+    const authorization = context.req.header("authorization") ?? "";
+    const bearerToken = authorization.match(/^Bearer\s+([^\s]+)$/i)?.[1];
+    if (!bearerToken) {
+      return context.json({ error: "Sign in to access the admin area.", code: "ADMIN_AUTH_REQUIRED" }, 401);
+    }
+    if (!adminTokenVerifier) {
+      return context.json(
+        { error: "Admin authentication is not configured.", code: "ADMIN_AUTH_NOT_CONFIGURED" },
+        503,
+      );
+    }
+
+    const verification = await adminTokenVerifier(bearerToken);
+    if (verification.status === "invalid") {
+      return context.json({ error: "That sign-in session is invalid or expired.", code: "INVALID_ADMIN_TOKEN" }, 401);
+    }
+    if (verification.status === "unavailable") {
+      return context.json(
+        { error: "The sign-in service is temporarily unavailable.", code: "ADMIN_AUTH_UNAVAILABLE" },
+        503,
+      );
+    }
+    if (!(await repository.isAdminUser(verification.user.id))) {
+      return context.json({ error: "This account is not a Common Days administrator.", code: "ADMIN_FORBIDDEN" }, 403);
+    }
+
+    context.set("adminUser", verification.user);
+    await next();
+  });
+
+  app.get("/api/v1/admin/me", (context) => {
+    return context.json(AdminMeResponseSchema.parse({ admin: context.get("adminUser") }));
+  });
+
+  app.get("/api/v1/admin/reports", async (context) => {
+    const rawStatus = context.req.query("status");
+    const status = rawStatus === undefined ? undefined : AdminReportStatusSchema.safeParse(rawStatus);
+    if (status && !status.success) {
+      return context.json({ error: "Invalid report status.", code: "INVALID_REPORT_STATUS" }, 400);
+    }
+
+    return context.json(AdminReportsResponseSchema.parse({
+      reports: await repository.listAdminReports(status?.data),
+    }));
+  });
+
+  app.get("/api/v1/admin/reports/:id", async (context) => {
+    try {
+      return context.json(AdminReportResponseSchema.parse({
+        report: await repository.getAdminReport(context.req.param("id")),
+      }));
+    } catch (error) {
+      if (error instanceof AdminReportNotFoundError) return context.json({ error: error.message }, 404);
+      throw error;
+    }
+  });
+
+  app.patch("/api/v1/admin/reports/:id", async (context) => {
+    let payload: unknown;
+    try {
+      payload = await context.req.json();
+    } catch {
+      return context.json({ error: "Invalid JSON body." }, 400);
+    }
+
+    const action = AdminReportActionSchema.safeParse(payload);
+    if (!action.success) {
+      return context.json({ error: "Invalid report action.", issues: action.error.flatten() }, 400);
+    }
+
+    try {
+      const report = await repository.updateAdminReport(
+        context.req.param("id"),
+        action.data,
+        context.get("adminUser").id,
+      );
+      const message = action.data.action === "start_review"
+        ? "Report marked as under review."
+        : "Report rejected with review notes.";
+      return context.json(AdminReportResponseSchema.parse({ report, message }));
+    } catch (error) {
+      if (error instanceof AdminReportNotFoundError) return context.json({ error: error.message }, 404);
+      if (error instanceof AdminReportTransitionError) {
+        return context.json({ error: error.message, code: "REPORT_STATUS_CONFLICT" }, 409);
+      }
+      throw error;
+    }
+  });
 
   app.get("/api/v1/schools", async (context) => {
     const query = context.req.query("q")?.trim() ?? "";

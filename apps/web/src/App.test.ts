@@ -75,6 +75,54 @@ describe("Common Days app", () => {
     expect(screen.getByText("December 2026")).toBeInTheDocument();
   });
 
+  it("prevents duplicate report submissions while a request is pending", async () => {
+    render(App);
+    await screen.findByText("When is everyone free?");
+
+    const fetchMock = vi.mocked(fetch);
+    let finishReport!: (response: Response) => void;
+    const pendingReport = new Promise<Response>((resolve) => { finishReport = resolve; });
+    fetchMock.mockImplementationOnce(() => pendingReport);
+    const requestCount = fetchMock.mock.calls.length;
+
+    await fireEvent.click(screen.getAllByRole("button", { name: "Report" })[0]);
+    await fireEvent.input(screen.getByPlaceholderText(/Spring break should end/i), {
+      target: { value: "The official calendar lists a different end date." },
+    });
+    const submit = screen.getByRole("button", { name: "Submit report" });
+    await fireEvent.click(submit);
+    await fireEvent.click(submit);
+
+    expect(screen.getByRole("button", { name: "Submitting..." })).toBeDisabled();
+    expect(fetchMock.mock.calls).toHaveLength(requestCount + 1);
+
+    finishReport(new Response(JSON.stringify({ report: { id: "report-1" } }), { status: 201 }));
+    expect(await screen.findByText("Report submitted for review.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submitted" })).toBeDisabled();
+  });
+
+  it("ignores a report response after the modal is closed and reopened", async () => {
+    render(App);
+    await screen.findByText("When is everyone free?");
+
+    const fetchMock = vi.mocked(fetch);
+    let finishReport!: (response: Response) => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => { finishReport = resolve; }));
+
+    await fireEvent.click(screen.getAllByRole("button", { name: "Report" })[0]);
+    await fireEvent.input(screen.getByPlaceholderText(/Spring break should end/i), {
+      target: { value: "This report belongs only to the first open modal." },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Submit report" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await fireEvent.click(screen.getAllByRole("button", { name: "Report" })[1]);
+
+    finishReport(new Response(JSON.stringify({ report: { id: "report-1" } }), { status: 201 }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: /UC Berkeley/ })).toBeInTheDocument());
+    expect(screen.queryByText("Report submitted for review.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit report" })).toBeDisabled();
+  });
+
   it("shows that an existing school year can be reused", async () => {
     render(App);
     await screen.findByText("When is everyone free?");

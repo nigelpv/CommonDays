@@ -198,6 +198,7 @@ main {
 .primary-button.lime { background: var(--lime); }
 .primary-button:disabled { cursor: not-allowed; filter: grayscale(.8); opacity: .45; box-shadow: none; }
 .report-status { display: flex; align-items: center; gap: 7px; margin-top: 14px; padding: 11px; border: 1px solid #78912d; border-radius: 9px; background: #eaffab; color: #43520f; font-size: 11px; font-weight: 850; }
+.report-status.error { border-color: #b84b3b; background: #ffddd7; color: #7b2d22; }
 
 .add-school-modal { width: min(700px,100%); min-height: 360px; }
 .add-school-modal.withBack { padding-top: 64px; }

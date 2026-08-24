@@ -1,5 +1,17 @@
 import { mount } from "svelte";
-import App from "./App.svelte";
 import "./app.css";
+import "./admin.css";
 
-mount(App, { target: document.getElementById("app")! });
+const path = window.location.pathname.replace(/\/$/, "") || "/";
+
+async function start() {
+  const module = path === "/admin/login"
+    ? await import("./lib/AdminLogin.svelte")
+    : path === "/admin" || path.startsWith("/admin/reports")
+      ? await import("./lib/AdminReports.svelte")
+      : await import("./App.svelte");
+
+  mount(module.default, { target: document.getElementById("app")! });
+}
+
+void start();

@@ -229,6 +229,44 @@ describe("Common Days API", () => {
     expect(comparisonBody.events.length).toBeGreaterThan(0);
   });
 
+  it("keeps seed events attached to their exact academic year calendar", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-24T12:00:00.000Z"));
+    const form = new FormData();
+    form.append("files", pdfFile());
+
+    const createResponse = await app.request("/api/v1/schools/uiuc/calendars/2027-28/submissions", {
+      method: "POST",
+      body: form,
+    });
+    const created = await createResponse.json();
+    vi.advanceTimersByTime(1_300);
+    await app.request(`/api/v1/calendar-submissions/${created.submission.id}`);
+
+    const oldComparison = await app.request("/api/v1/calendars?schools=uiuc&year=2026-27");
+    const oldBody = await oldComparison.json();
+    const newComparison = await app.request("/api/v1/calendars?schools=uiuc&year=2027-28");
+    const newBody = await newComparison.json();
+
+    expect(oldBody.events).toHaveLength(4);
+    expect(newBody.events).toHaveLength(4);
+    expect(oldBody.events.every((event: { id: string }) => !event.id.startsWith(created.submission.id))).toBe(true);
+    expect(newBody.events.every((event: { id: string }) => event.id.startsWith(created.submission.id))).toBe(true);
+
+    const crossYearReport = await app.request("/api/v1/reports", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        schoolId: "uiuc",
+        academicYear: "2026-27",
+        eventId: newBody.events[0].id,
+        reason: "wrong_date",
+        details: "This event belongs to another academic year.",
+      }),
+    });
+    expect(crossYearReport.status).toBe(422);
+  });
+
   it("rejects files whose bytes do not match their claimed type", async () => {
     const form = new FormData();
     form.append("files", new File(["not a real image"], "fake.png", { type: "image/png" }));

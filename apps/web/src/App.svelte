@@ -29,6 +29,9 @@
   let reportSchool: School | null = null;
   let reportDetails = "";
   let reportStatus = "";
+  let reportSubmitting = false;
+  let reportSucceeded = false;
+  let reportRequestNumber = 0;
 
   $: selectedSchools = allSchools.filter((school) => selectedIds.includes(school.id));
   $: monthStart = startOfMonth(activeMonth);
@@ -95,25 +98,48 @@
   }
 
   function openReport(school: School) {
+    reportRequestNumber += 1;
     reportSchool = school;
     reportDetails = "";
     reportStatus = "";
+    reportSubmitting = false;
+    reportSucceeded = false;
     reportOpen = true;
   }
 
+  function closeReport() {
+    reportRequestNumber += 1;
+    reportOpen = false;
+    reportSchool = null;
+  }
+
   async function submitReport() {
-    if (!reportSchool || reportDetails.trim().length < 10) return;
-    const response = await fetch("/api/v1/reports", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        schoolId: reportSchool.id,
-        academicYear,
-        reason: "other",
-        details: reportDetails,
-      }),
-    });
-    reportStatus = response.ok ? "Report submitted for review." : "That report could not be submitted.";
+    if (!reportSchool || reportDetails.trim().length < 10 || reportSubmitting || reportSucceeded) return;
+    const school = reportSchool;
+    const currentRequest = ++reportRequestNumber;
+    reportSubmitting = true;
+    reportStatus = "";
+    try {
+      const response = await fetch("/api/v1/reports", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schoolId: school.id,
+          academicYear,
+          reason: "other",
+          details: reportDetails,
+        }),
+      });
+      if (currentRequest !== reportRequestNumber || !reportOpen || reportSchool?.id !== school.id) return;
+      reportSucceeded = response.ok;
+      reportStatus = response.ok ? "Report submitted for review." : "That report could not be submitted.";
+    } catch {
+      if (currentRequest !== reportRequestNumber || !reportOpen || reportSchool?.id !== school.id) return;
+      reportSucceeded = false;
+      reportStatus = "That report could not be submitted.";
+    } finally {
+      if (currentRequest === reportRequestNumber) reportSubmitting = false;
+    }
   }
 
   function findBestWindow(events: CalendarEvent[], schoolIds: string[]) {
@@ -283,15 +309,22 @@
 {/if}
 
 {#if reportOpen && reportSchool}
-  <div class="modal-backdrop" role="presentation" onclick={(event) => event.target === event.currentTarget && (reportOpen = false)}>
+  <div class="modal-backdrop" role="presentation" onclick={(event) => event.target === event.currentTarget && closeReport()}>
     <div class="modal report-modal" role="dialog" aria-modal="true" aria-labelledby="report-title" tabindex="-1">
-      <button class="modal-close" aria-label="Close" onclick={() => (reportOpen = false)}><X size={18} /></button>
+      <button class="modal-close" aria-label="Close" onclick={closeReport}><X size={18} /></button>
       <span class="modal-kicker">CALENDAR CORRECTION</span>
       <h2 id="report-title">Report a problem with {reportSchool.shortName}</h2>
       <p>Tell us which date is wrong or missing. A report proposes a correction and never overwrites the shared calendar automatically.</p>
       <textarea bind:value={reportDetails} rows="5" placeholder="Example: Spring break should end on March 21, not March 20."></textarea>
-      <button class="primary-button" disabled={reportDetails.trim().length < 10} onclick={submitReport}>Submit report</button>
-      {#if reportStatus}<div class="report-status"><Check size={16} /> {reportStatus}</div>{/if}
+      <button class="primary-button" disabled={reportDetails.trim().length < 10 || reportSubmitting || reportSucceeded} onclick={submitReport}>
+        {reportSubmitting ? "Submitting..." : reportSucceeded ? "Submitted" : "Submit report"}
+      </button>
+      {#if reportStatus}
+        <div class:error={!reportSucceeded} class="report-status" role={reportSucceeded ? "status" : "alert"}>
+          {#if reportSucceeded}<Check size={16} />{:else}<AlertTriangle size={16} />{/if}
+          {reportStatus}
+        </div>
+      {/if}
     </div>
   </div>
 {/if}

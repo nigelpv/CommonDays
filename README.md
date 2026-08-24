@@ -17,12 +17,12 @@ Common Days compares college academic calendars and shows the exact dates a grou
 
 ```bash
 npm install
-npm run dev
+USE_DEVELOPMENT_SEED=true npm run dev
 ```
 
 The web app runs at `http://localhost:5173` and proxies API requests to `http://localhost:8787`.
 
-If no database URL is configured, the API automatically uses the development calendars already in the repository. The current UI therefore works immediately after `npm install`.
+`USE_DEVELOPMENT_SEED=true` explicitly enables the temporary calendars already in the repository when no database URL is configured. Production always requires `DATABASE_URL` and will fail closed instead of silently storing reports or review decisions in memory.
 
 ## School availability and uploads
 
@@ -38,18 +38,32 @@ During credential-free local development, Michigan's 2026-27 calendar is intenti
 
 With the database and server-only Supabase Storage variables configured, uploads are stored in the private `calendar-sources` bucket and their metadata is written to PostgreSQL. They remain in processing until the Gemini extraction worker is connected; no example dates are published in Supabase mode.
 
+## Private admin review
+
+Students can submit calendar mistake reports from the public comparison. Those reports are stored in Supabase and appear only in the protected review desk at `http://localhost:5173/admin/login`.
+
+- Supabase verifies the passwordless email link and issues the browser session.
+- The API verifies that session again, then checks the user's immutable ID against the single administrator in `private.app_admin`.
+- The admin can move a new report into review or reject it with decision notes.
+- Calendar corrections are not published automatically. The atomic correction-and-resolution action and secure source-file preview are intentionally reserved for the next slice.
+
+For local admin access, copy `apps/web/.env.example` to `apps/web/.env` and add the project's URL and publishable key. The API needs the same publishable key in `apps/api/.env`; the Supabase secret key and database URL remain API-only. After changing an environment file, stop and restart `npm run dev`.
+
+For Vercel, set the project Root Directory to `apps/web`. Its `vercel.json` sends direct `/admin` and `/admin/*` loads to the Vite entry point, which keeps passwordless callback links working. The production API proxy or `VITE_API_BASE_URL` connection still needs to be configured when the Railway URL exists.
+
 ## Supabase persistence
 
 The API now has a Drizzle schema and repository for schools, reusable academic-year calendars, extracted events, uploaded source files, and correction reports. Database credentials are optional during development and are never sent to the browser.
 
 1. Create a free Supabase project and copy its Postgres connection string, project URL, and server secret key.
-2. Create your local API environment file:
+2. Create your local API and browser environment files:
 
    ```bash
    cp apps/api/.env.example apps/api/.env
+   cp apps/web/.env.example apps/web/.env
    ```
 
-3. Fill in the database and Supabase Storage variables in `apps/api/.env`. URL-encode special characters in the database password.
+3. Fill in the database, Auth, Storage, and exact `CORS_ALLOWED_ORIGINS` values in `apps/api/.env`. Fill in only the public project URL and publishable key in `apps/web/.env`. URL-encode special characters in the database password.
 4. Apply the committed migrations:
 
    ```bash
@@ -82,4 +96,4 @@ npm test
 npm run build
 ```
 
-Without `DATABASE_URL`, the current data remains representative development data. Durable Supabase Storage is connected on the server; the admin UI/Auth flow and Gemini extraction worker are the remaining Supabase-adjacent implementation slices.
+Without `DATABASE_URL`, representative development data is available only when `USE_DEVELOPMENT_SEED=true` is explicitly enabled outside production. Durable Supabase Storage and the sole-admin review flow are connected; the Gemini extraction worker, signed source preview, and atomic correction publisher are the next backend slices.
