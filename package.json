@@ -10,7 +10,10 @@
     "dev:api": "npm run dev --workspace @commondays/api",
     "build": "npm run build --workspace @commondays/shared && npm run build --workspace @commondays/api && npm run build --workspace @commondays/web",
     "check": "npm run check --workspace @commondays/shared && npm run check --workspace @commondays/api && npm run check --workspace @commondays/web",
-    "test": "npm run test --workspace @commondays/api && npm run test --workspace @commondays/web"
+    "test": "npm run test --workspace @commondays/api && npm run test --workspace @commondays/web",
+    "db:generate": "npm run db:generate --workspace @commondays/api",
+    "db:migrate": "npm run db:migrate --workspace @commondays/api",
+    "db:seed": "npm run db:seed --workspace @commondays/api"
   },
   "devDependencies": {
     "concurrently": "latest",

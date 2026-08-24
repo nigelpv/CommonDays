@@ -7,16 +7,23 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc --noEmit",
-    "test": "vitest run src"
+    "test": "vitest run src",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:seed": "tsx src/db/seed.ts"
   },
   "dependencies": {
     "@commondays/shared": "*",
     "@hono/node-server": "latest",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
     "hono": "latest",
+    "postgres": "^3.4.9",
     "zod": "latest"
   },
   "devDependencies": {
     "@types/node": "latest",
+    "drizzle-kit": "^0.31.10",
     "tsx": "latest",
     "typescript": "latest",
     "vitest": "latest"
