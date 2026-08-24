@@ -18,6 +18,15 @@ import {
   schools as schoolTable,
 } from "../db/schema.js";
 import { events as seedEvents, schools as seedSchools } from "../data.js";
+import {
+  createDurableCalendarSubmission,
+  type CalendarSubmissionPersistence,
+  type CalendarUploadFile,
+  type ReservedCalendarSubmission,
+} from "../services/calendar-submission-service.js";
+import { createCalendarStorage, type CalendarStorage } from "../storage/calendar-storage.js";
+
+export type { CalendarUploadFile } from "../services/calendar-submission-service.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -32,13 +41,6 @@ export type SubmittedReport = CalendarReport & {
   id: string;
   status: "submitted";
 };
-
-export interface CalendarUploadFile {
-  name: string;
-  mimeType: string;
-  size: number;
-  content: Uint8Array;
-}
 
 export interface CalendarRepository {
   readonly source: DataSource;
@@ -277,10 +279,17 @@ function mapSchool(
   };
 }
 
-class PostgresCalendarRepository implements CalendarRepository {
+function isUniqueViolation(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
+}
+
+export class PostgresCalendarRepository implements CalendarRepository {
   readonly source = "supabase" as const;
 
-  constructor(private readonly connection: DatabaseConnection) {}
+  constructor(
+    private readonly connection: DatabaseConnection,
+    private readonly storage: CalendarStorage | null,
+  ) {}
 
   private async getPublishedYears(schoolIds: string[]) {
     const yearsBySchool = new Map<string, string[]>();
@@ -399,8 +408,116 @@ class PostgresCalendarRepository implements CalendarRepository {
     };
   }
 
-  async createCalendarSubmission(): Promise<CalendarSubmission> {
-    throw new UploadStorageNotConfiguredError();
+  private async reserveCalendarSubmission(
+    request: CalendarSubmissionRequest,
+    sourceType: ReservedCalendarSubmission["sourceType"],
+  ): Promise<ReservedCalendarSubmission> {
+    try {
+      return await this.connection.db.transaction(async (transaction) => {
+        const [school] = await transaction
+          .select({ id: schoolTable.id })
+          .from(schoolTable)
+          .where(eq(schoolTable.id, request.schoolId))
+          .limit(1);
+        if (!school) throw new SchoolNotFoundError();
+
+        const existingCalendars = await transaction
+          .select({
+            id: academicCalendars.id,
+            status: academicCalendars.status,
+            version: academicCalendars.version,
+          })
+          .from(academicCalendars)
+          .where(
+            and(
+              eq(academicCalendars.schoolId, request.schoolId),
+              eq(academicCalendars.academicYear, request.academicYear),
+            ),
+          )
+          .orderBy(desc(academicCalendars.version));
+
+        if (existingCalendars.some((calendar) => calendar.status === "published")) {
+          throw new CalendarAlreadyAvailableError();
+        }
+
+        const activeCalendar = existingCalendars.find(
+          (calendar) => calendar.status === "processing" || calendar.status === "needs_review",
+        );
+        if (activeCalendar) throw new SubmissionAlreadyInProgressError(activeCalendar.id);
+
+        const nextVersion = Math.max(0, ...existingCalendars.map((calendar) => calendar.version)) + 1;
+        const [createdCalendar] = await transaction
+          .insert(academicCalendars)
+          .values({
+            schoolId: request.schoolId,
+            academicYear: request.academicYear,
+            version: nextVersion,
+            status: "processing",
+            sourceType,
+          })
+          .returning({
+            id: academicCalendars.id,
+            schoolId: academicCalendars.schoolId,
+            academicYear: academicCalendars.academicYear,
+            sourceType: academicCalendars.sourceType,
+            createdAt: academicCalendars.createdAt,
+          });
+
+        if (!createdCalendar || (createdCalendar.sourceType !== "screenshots" && createdCalendar.sourceType !== "pdf")) {
+          throw new Error("The calendar submission could not be reserved.");
+        }
+
+        return {
+          ...createdCalendar,
+          sourceType: createdCalendar.sourceType,
+        };
+      });
+    } catch (error) {
+      if (
+        error instanceof SchoolNotFoundError ||
+        error instanceof CalendarAlreadyAvailableError ||
+        error instanceof SubmissionAlreadyInProgressError ||
+        !isUniqueViolation(error)
+      ) {
+        throw error;
+      }
+
+      const availability = await this.getAvailability(request.schoolId, request.academicYear);
+      if (availability.status === "available") throw new CalendarAlreadyAvailableError();
+      if (availability.status === "processing") {
+        throw new SubmissionAlreadyInProgressError(availability.submissionId);
+      }
+      throw error;
+    }
+  }
+
+  async createCalendarSubmission(
+    request: CalendarSubmissionRequest,
+    files: CalendarUploadFile[],
+  ): Promise<CalendarSubmission> {
+    if (!this.storage) throw new UploadStorageNotConfiguredError();
+
+    const persistence: CalendarSubmissionPersistence = {
+      reserve: (submissionRequest, sourceType) =>
+        this.reserveCalendarSubmission(submissionRequest, sourceType),
+      insertUploads: async (uploads) => {
+        if (uploads.length === 0) return;
+        await this.connection.db.insert(calendarUploads).values(uploads);
+      },
+      markFailed: async (calendarId) => {
+        await this.connection.db
+          .update(academicCalendars)
+          .set({ status: "failed", updatedAt: new Date() })
+          .where(eq(academicCalendars.id, calendarId));
+      },
+    };
+
+    return createDurableCalendarSubmission({
+      request,
+      files,
+      storage: this.storage,
+      persistence,
+    });
   }
 
   async getCalendarSubmission(id: string): Promise<CalendarSubmission> {
@@ -482,7 +599,12 @@ class PostgresCalendarRepository implements CalendarRepository {
   }
 }
 
-export function createCalendarRepository(options: { databaseUrl?: string } = {}): CalendarRepository {
+export function createCalendarRepository(
+  options: { databaseUrl?: string; storage?: CalendarStorage | null } = {},
+): CalendarRepository {
   const connection = createDatabase(options.databaseUrl ?? process.env.DATABASE_URL);
-  return connection ? new PostgresCalendarRepository(connection) : createSeedRepository();
+  if (!connection) return createSeedRepository();
+
+  const storage = "storage" in options ? options.storage ?? null : createCalendarStorage();
+  return new PostgresCalendarRepository(connection, storage);
 }
