@@ -375,12 +375,12 @@ export function createApp(
   });
 
   app.get("/api/v1/calendars", async (context) => {
-    const yearResult = AcademicYearSchema.safeParse(context.req.query("year") ?? "2026-27");
+    const yearResult = AcademicYearSchema.safeParse(context.req.query("year"));
     if (!yearResult.success) return context.json({ error: "Invalid academic year." }, 400);
 
     const schoolIds = [
       ...new Set(
-        (context.req.query("schools") ?? "uiuc,berkeley,nyu")
+        (context.req.query("schools") ?? "")
           .split(",")
           .map((schoolId) => schoolId.trim())
           .filter(Boolean),

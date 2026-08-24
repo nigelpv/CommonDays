@@ -11,6 +11,7 @@ const schools = [
 ];
 
 const submissionId = "9e6c83d3-cdbb-4d0c-a81c-823463cced1f";
+let comparisonSchoolIdsOverride: string[] | null = null;
 
 function screenshot(name: string) {
   return new File([name], name, { type: "image/png", lastModified: 1 });
@@ -20,8 +21,27 @@ function pdf(name = "calendar.pdf") {
   return new File(["%PDF-1.7\ncalendar"], name, { type: "application/pdf", lastModified: 1 });
 }
 
+function comparisonRequests() {
+  return vi.mocked(fetch).mock.calls.filter(([input]) =>
+    new URL(String(input), "http://localhost").pathname === "/api/v1/calendars",
+  );
+}
+
+async function addReadySchool(name: RegExp, shortName: string) {
+  const openPicker = screen.queryByRole("button", { name: "Choose a school" })
+    ?? screen.getByRole("button", { name: "Add another school" });
+  await fireEvent.click(openPicker);
+  await fireEvent.click(screen.getByRole("button", { name }));
+  expect(await screen.findByText(`${shortName} is ready to use.`)).toBeInTheDocument();
+  await fireEvent.click(screen.getByRole("button", { name: `Add ${shortName}` }));
+  await waitFor(() => {
+    expect(within(screen.getByRole("complementary")).getByText(shortName)).toBeInTheDocument();
+  });
+}
+
 describe("Common Days app", () => {
   beforeEach(() => {
+    comparisonSchoolIdsOverride = null;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), "http://localhost");
       let body: unknown;
@@ -54,7 +74,14 @@ describe("Common Days app", () => {
           },
         };
       } else if (url.pathname === "/api/v1/calendars") {
-        body = { academicYear: "2026-27", schools, events: [], source: "development_seed" };
+        const requestedIds = (url.searchParams.get("schools") ?? "").split(",").filter(Boolean);
+        const responseIds = comparisonSchoolIdsOverride ?? requestedIds;
+        body = {
+          academicYear: "2026-27",
+          schools: schools.filter((school) => responseIds.includes(school.id)),
+          events: [],
+          source: "supabase",
+        };
       } else {
         body = { schools };
       }
@@ -68,16 +95,79 @@ describe("Common Days app", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders the core calendar comparison", async () => {
+  it("starts empty without requesting a prototype comparison", async () => {
     render(App);
-    expect(await screen.findByText("When is everyone free?")).toBeInTheDocument();
-    expect(screen.getAllByText("UIUC").length).toBeGreaterThan(0);
-    expect(screen.getByText("December 2026")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Add your first school." })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose a school" })).toBeInTheDocument();
+    expect(screen.queryByText("Summer plans")).not.toBeInTheDocument();
+    expect(screen.queryByText("DEVELOPMENT DATA")).not.toBeInTheDocument();
+    expect(screen.queryByText("UIUC")).not.toBeInTheDocument();
+    expect(comparisonRequests()).toHaveLength(0);
+  });
+
+  it("adds the first available school and begins at the academic-year start", async () => {
+    render(App);
+    await screen.findByRole("heading", { name: "Add your first school." });
+    await addReadySchool(/University of Illinois Urbana-Champaign/i, "UIUC");
+
+    expect(screen.getByText("When is everyone free?")).toBeInTheDocument();
+    expect(screen.getByText("August 2026")).toBeInTheDocument();
+    expect(comparisonRequests()).toHaveLength(1);
+    expect(new URL(String(comparisonRequests()[0][0]), "http://localhost").searchParams.get("schools")).toBe("uiuc");
+  });
+
+  it("removes the final school locally and returns to onboarding", async () => {
+    render(App);
+    await screen.findByRole("heading", { name: "Add your first school." });
+    await addReadySchool(/University of Illinois Urbana-Champaign/i, "UIUC");
+    expect(comparisonRequests()).toHaveLength(1);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Remove UIUC" }));
+
+    expect(await screen.findByRole("heading", { name: "Add your first school." })).toBeInTheDocument();
+    expect(screen.queryByText("When is everyone free?")).not.toBeInTheDocument();
+    expect(comparisonRequests()).toHaveLength(1);
+  });
+
+  it("keeps the first-school state when availability changes before add", async () => {
+    render(App);
+    await screen.findByRole("heading", { name: "Add your first school." });
+    await fireEvent.click(screen.getByRole("button", { name: "Choose a school" }));
+    await fireEvent.click(screen.getByRole("button", { name: /University of Illinois Urbana-Champaign/i }));
+    expect(await screen.findByText("UIUC is ready to use.")).toBeInTheDocument();
+
+    comparisonSchoolIdsOverride = [];
+    await fireEvent.click(screen.getByRole("button", { name: "Add UIUC" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("UIUC 2026-27 is no longer available");
+    expect(screen.getByRole("heading", { name: "What school are we adding?" })).toBeInTheDocument();
+    expect(within(screen.getByRole("button", { name: /University of Illinois Urbana-Champaign/i })).getByText("2026-27 NEEDED")).toBeInTheDocument();
+    expect(within(screen.getByRole("complementary")).queryByText("UIUC")).not.toBeInTheDocument();
+    expect(screen.queryByText("When is everyone free?")).not.toBeInTheDocument();
+  });
+
+  it("removes an already-selected school when its published calendar disappears", async () => {
+    render(App);
+    await screen.findByRole("heading", { name: "Add your first school." });
+    await addReadySchool(/University of Illinois Urbana-Champaign/i, "UIUC");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Add another school" }));
+    await fireEvent.click(screen.getByRole("button", { name: /University of California, Berkeley/i }));
+    expect(await screen.findByText("UC Berkeley is ready to use.")).toBeInTheDocument();
+
+    comparisonSchoolIdsOverride = ["berkeley"];
+    await fireEvent.click(screen.getByRole("button", { name: "Add UC Berkeley" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("UIUC 2026-27 is no longer available");
+    expect(await screen.findByRole("heading", { name: "Add your first school." })).toBeInTheDocument();
+    expect(within(screen.getByRole("complementary")).queryByText("UIUC")).not.toBeInTheDocument();
+    expect(screen.queryByText("When is everyone free?")).not.toBeInTheDocument();
   });
 
   it("prevents duplicate report submissions while a request is pending", async () => {
     render(App);
-    await screen.findByText("When is everyone free?");
+    await screen.findByRole("heading", { name: "Add your first school." });
+    await addReadySchool(/University of Illinois Urbana-Champaign/i, "UIUC");
 
     const fetchMock = vi.mocked(fetch);
     let finishReport!: (response: Response) => void;
@@ -103,7 +193,9 @@ describe("Common Days app", () => {
 
   it("ignores a report response after the modal is closed and reopened", async () => {
     render(App);
-    await screen.findByText("When is everyone free?");
+    await screen.findByRole("heading", { name: "Add your first school." });
+    await addReadySchool(/University of Illinois Urbana-Champaign/i, "UIUC");
+    await addReadySchool(/University of California, Berkeley/i, "UC Berkeley");
 
     const fetchMock = vi.mocked(fetch);
     let finishReport!: (response: Response) => void;
@@ -125,12 +217,12 @@ describe("Common Days app", () => {
 
   it("shows that an existing school year can be reused", async () => {
     render(App);
-    await screen.findByText("When is everyone free?");
-    await fireEvent.click(screen.getByRole("button", { name: "Add another school" }));
+    await screen.findByRole("heading", { name: "Add your first school." });
+    await fireEvent.click(screen.getByRole("button", { name: "Choose a school" }));
     await fireEvent.click(screen.getByRole("button", { name: /Purdue University/i }));
 
     expect(await screen.findByText("Purdue is ready to use.")).toBeInTheDocument();
-    expect(screen.queryByText("Read calendar with AI")).not.toBeInTheDocument();
+    expect(screen.queryByText("Submit calendar for processing")).not.toBeInTheDocument();
     await fireEvent.click(screen.getByRole("button", { name: "Add Purdue" }));
 
     await waitFor(() => {
@@ -145,19 +237,19 @@ describe("Common Days app", () => {
 
   it("opens the uploader only when the school year is missing", async () => {
     render(App);
-    await screen.findByText("When is everyone free?");
-    await fireEvent.click(screen.getByRole("button", { name: "Add another school" }));
+    await screen.findByRole("heading", { name: "Add your first school." });
+    await fireEvent.click(screen.getByRole("button", { name: "Choose a school" }));
     await fireEvent.click(screen.getByRole("button", { name: /University of Michigan/i }));
 
     expect(await screen.findByText("Be the first to add Michigan.")).toBeInTheDocument();
-    expect(screen.getByText(/Upload multiple screenshots.*one official PDF/i)).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByText(/Upload multiple screenshots.*one official PDF/i)).toBeInTheDocument();
     expect(screen.queryByText(/10 screenshots/i)).not.toBeInTheDocument();
   });
 
   it("reveals the screenshot limit only after ten screenshots are selected", async () => {
     const { container } = render(App);
-    await screen.findByText("When is everyone free?");
-    await fireEvent.click(screen.getByRole("button", { name: "Add another school" }));
+    await screen.findByRole("heading", { name: "Add your first school." });
+    await fireEvent.click(screen.getByRole("button", { name: "Choose a school" }));
     await fireEvent.click(screen.getByRole("button", { name: /University of Michigan/i }));
     await screen.findByText("Be the first to add Michigan.");
 
@@ -187,15 +279,15 @@ describe("Common Days app", () => {
 
   it("submits a missing PDF, waits for processing, and adds the reusable school", async () => {
     const { container } = render(App);
-    await screen.findByText("When is everyone free?");
-    await fireEvent.click(screen.getByRole("button", { name: "Add another school" }));
+    await screen.findByRole("heading", { name: "Add your first school." });
+    await fireEvent.click(screen.getByRole("button", { name: "Choose a school" }));
     await fireEvent.click(screen.getByRole("button", { name: /University of Michigan/i }));
     await screen.findByText("Be the first to add Michigan.");
 
     const input = container.querySelector<HTMLInputElement>('input[type="file"]');
     expect(input).not.toBeNull();
     await fireEvent.change(input!, { target: { files: [pdf()] } });
-    await fireEvent.click(screen.getByRole("button", { name: "Read calendar with AI" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Submit calendar for processing" }));
 
     expect(await screen.findByText("Michigan 2026-27 is ready.")).toBeInTheDocument();
     await waitFor(() => {

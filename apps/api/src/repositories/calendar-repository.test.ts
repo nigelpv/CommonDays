@@ -11,27 +11,13 @@ describe("calendar repository configuration", () => {
     vi.unstubAllEnvs();
   });
 
-  it("fails closed without a database unless seed data is explicitly enabled", () => {
-    expect(() => createCalendarRepository({
-      databaseUrl: "",
-      allowDevelopmentSeed: false,
-    })).toThrow(CalendarRepositoryNotConfiguredError);
-
-    expect(createCalendarRepository({
-      databaseUrl: "",
-      allowDevelopmentSeed: true,
-    }).source).toBe("development_seed");
+  it("fails closed without a database", () => {
+    expect(() => createCalendarRepository({ databaseUrl: "" })).toThrow(
+      CalendarRepositoryNotConfiguredError,
+    );
   });
 
-  it("supports an explicitly enabled development-seed environment", () => {
-    vi.stubEnv("NODE_ENV", "development");
-    vi.stubEnv("USE_DEVELOPMENT_SEED", "true");
-
-    expect(createCalendarRepository({ databaseUrl: "" }).source).toBe("development_seed");
-  });
-
-  it("never falls back to seed data in production", () => {
-    vi.stubEnv("NODE_ENV", "production");
+  it("does not honor the removed development-seed environment switch", () => {
     vi.stubEnv("USE_DEVELOPMENT_SEED", "true");
 
     expect(() => createCalendarRepository({ databaseUrl: "" })).toThrow(

@@ -33,7 +33,7 @@ export const CalendarComparisonSchema = z.object({
   academicYear: AcademicYearSchema,
   schools: z.array(SchoolSchema),
   events: z.array(CalendarEventSchema),
-  source: z.enum(["development_seed", "supabase"]),
+  source: z.literal("supabase"),
 });
 
 export const CalendarReportSchema = z.object({

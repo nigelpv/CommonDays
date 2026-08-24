@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import type { AdminTokenVerifier } from "./auth/admin-auth.js";
-import { createSeedRepository } from "./repositories/calendar-repository.js";
+import { createTestCalendarRepository } from "./testing/calendar-repository.fixture.js";
 
 const adminUserId = "00000000-0000-4000-8000-000000000001";
 const otherUserId = "00000000-0000-4000-8000-000000000002";
@@ -17,7 +17,7 @@ const verifier: AdminTokenVerifier = async (accessToken) => {
 };
 
 function createAdminTestApp() {
-  const repository = createSeedRepository({ adminUserId });
+  const repository = createTestCalendarRepository({ adminUserId });
   return createApp(repository, { adminTokenVerifier: verifier });
 }
 
@@ -59,7 +59,7 @@ describe("Common Days admin report API", () => {
   });
 
   it("only emits CORS access for an exact validated origin", async () => {
-    const app = createApp(createSeedRepository({ adminUserId }), {
+    const app = createApp(createTestCalendarRepository({ adminUserId }), {
       adminTokenVerifier: verifier,
       corsOrigins: ["https://admin.commondays.test"],
     });
@@ -72,7 +72,7 @@ describe("Common Days admin report API", () => {
     });
 
     expect(blocked.headers.get("access-control-allow-origin")).toBeNull();
-    expect(() => createApp(createSeedRepository({ adminUserId }), {
+    expect(() => createApp(createTestCalendarRepository({ adminUserId }), {
       adminTokenVerifier: verifier,
       corsOrigins: ["https://admin.commondays.test/not-an-origin"],
     })).toThrow("Invalid CORS origin");
@@ -90,7 +90,7 @@ describe("Common Days admin report API", () => {
   });
 
   it("fails closed when server-side auth is not configured", async () => {
-    const app = createApp(createSeedRepository({ adminUserId }), { adminTokenVerifier: null });
+    const app = createApp(createTestCalendarRepository({ adminUserId }), { adminTokenVerifier: null });
     const response = await app.request("/api/v1/admin/me", { headers: adminHeaders() });
 
     expect(response.status).toBe(503);

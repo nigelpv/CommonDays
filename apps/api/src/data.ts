@@ -1,6 +1,10 @@
-import type { CalendarEvent, School } from "@commondays/shared";
+import type { School } from "@commondays/shared";
 
-export const schools: School[] = [
+export type SchoolDirectoryEntry = Omit<School, "availableYears">;
+
+// This is directory metadata only. Calendar availability is always derived from
+// published database records and must never be encoded in the school catalog.
+export const schoolDirectory: SchoolDirectoryEntry[] = [
   {
     id: "uiuc",
     name: "University of Illinois Urbana-Champaign",
@@ -8,7 +12,6 @@ export const schools: School[] = [
     location: "Champaign, Illinois",
     initials: "IL",
     color: "#6574f7",
-    availableYears: ["2026-27"],
   },
   {
     id: "berkeley",
@@ -17,7 +20,6 @@ export const schools: School[] = [
     location: "Berkeley, California",
     initials: "CA",
     color: "#ff765f",
-    availableYears: ["2026-27"],
   },
   {
     id: "nyu",
@@ -26,7 +28,6 @@ export const schools: School[] = [
     location: "New York, New York",
     initials: "NY",
     color: "#1fb09f",
-    availableYears: ["2026-27"],
   },
   {
     id: "purdue",
@@ -35,7 +36,6 @@ export const schools: School[] = [
     location: "West Lafayette, Indiana",
     initials: "IN",
     color: "#bd8c32",
-    availableYears: ["2026-27"],
   },
   {
     id: "michigan",
@@ -44,25 +44,5 @@ export const schools: School[] = [
     location: "Ann Arbor, Michigan",
     initials: "MI",
     color: "#e3ad22",
-    availableYears: [],
   },
-];
-
-export const events: CalendarEvent[] = [
-  { id: "uiuc-thanksgiving", schoolId: "uiuc", name: "Thanksgiving break", startDate: "2026-11-21", endDate: "2026-11-29", kind: "break" },
-  { id: "uiuc-winter", schoolId: "uiuc", name: "Winter break", startDate: "2026-12-19", endDate: "2027-01-17", kind: "break" },
-  { id: "uiuc-spring", schoolId: "uiuc", name: "Spring break", startDate: "2027-03-13", endDate: "2027-03-21", kind: "break" },
-  { id: "uiuc-summer", schoolId: "uiuc", name: "Summer break", startDate: "2027-05-15", endDate: "2027-08-22", kind: "break" },
-  { id: "berkeley-thanksgiving", schoolId: "berkeley", name: "Thanksgiving break", startDate: "2026-11-25", endDate: "2026-11-29", kind: "break" },
-  { id: "berkeley-winter", schoolId: "berkeley", name: "Winter break", startDate: "2026-12-19", endDate: "2027-01-11", kind: "break" },
-  { id: "berkeley-spring", schoolId: "berkeley", name: "Spring recess", startDate: "2027-03-22", endDate: "2027-03-26", kind: "break" },
-  { id: "berkeley-summer", schoolId: "berkeley", name: "Summer break", startDate: "2027-05-15", endDate: "2027-08-17", kind: "break" },
-  { id: "nyu-thanksgiving", schoolId: "nyu", name: "Thanksgiving recess", startDate: "2026-11-26", endDate: "2026-11-29", kind: "break" },
-  { id: "nyu-winter", schoolId: "nyu", name: "Winter recess", startDate: "2026-12-23", endDate: "2027-01-24", kind: "break" },
-  { id: "nyu-spring", schoolId: "nyu", name: "Spring break", startDate: "2027-03-15", endDate: "2027-03-21", kind: "break" },
-  { id: "nyu-summer", schoolId: "nyu", name: "Summer break", startDate: "2027-05-15", endDate: "2027-09-01", kind: "break" },
-  { id: "purdue-thanksgiving", schoolId: "purdue", name: "Thanksgiving vacation", startDate: "2026-11-25", endDate: "2026-11-29", kind: "break" },
-  { id: "purdue-winter", schoolId: "purdue", name: "Winter recess", startDate: "2026-12-20", endDate: "2027-01-10", kind: "break" },
-  { id: "purdue-spring", schoolId: "purdue", name: "Spring vacation", startDate: "2027-03-13", endDate: "2027-03-21", kind: "break" },
-  { id: "purdue-summer", schoolId: "purdue", name: "Summer break", startDate: "2027-05-09", endDate: "2027-08-22", kind: "break" },
 ];

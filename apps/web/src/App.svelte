@@ -10,20 +10,23 @@
     startOfMonth,
     subMonths,
   } from "date-fns";
-  import { AlertTriangle, ArrowLeft, ArrowRight, CalendarDays, Check, Plus, Sparkles, X } from "@lucide/svelte";
+  import { AlertTriangle, ArrowLeft, ArrowRight, Check, Plus, Sparkles, X } from "@lucide/svelte";
   import type { CalendarComparison, CalendarEvent, School } from "@commondays/shared";
   import AddSchoolModal from "./lib/AddSchoolModal.svelte";
 
   const academicYear = "2026-27";
+  const academicYearStart = new Date(Number(academicYear.slice(0, 4)), 7, 1);
   const weekdays = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 
   let comparison: CalendarComparison | null = null;
   let allSchools: School[] = [];
-  let selectedIds = ["uiuc", "berkeley", "nyu"];
-  let activeMonth = new Date(2026, 11, 1);
-  let selectedDate = new Date(2026, 11, 23);
+  let selectedIds: string[] = [];
+  let activeMonth = startOfMonth(academicYearStart);
+  let selectedDate = academicYearStart;
   let isLoading = true;
   let error = "";
+  let comparisonError = "";
+  let comparisonUpdating = false;
   let schoolPickerOpen = false;
   let reportOpen = false;
   let reportSchool: School | null = null;
@@ -33,7 +36,10 @@
   let reportSucceeded = false;
   let reportRequestNumber = 0;
 
-  $: selectedSchools = allSchools.filter((school) => selectedIds.includes(school.id));
+  $: selectedSchools = selectedIds.flatMap((schoolId) => {
+    const school = comparison?.schools.find((candidate) => candidate.id === schoolId);
+    return school ? [school] : [];
+  });
   $: monthStart = startOfMonth(activeMonth);
   $: monthDays = eachDayOfInterval({ start: monthStart, end: endOfMonth(activeMonth) });
   $: leadingDays = Array(monthStart.getDay()).fill(null);
@@ -42,7 +48,6 @@
   onMount(async () => {
     try {
       await loadSchools();
-      await loadComparison();
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Could not load Common Days";
     } finally {
@@ -57,30 +62,82 @@
     allSchools = schoolBody.schools;
   }
 
-  async function loadComparison() {
-    const params = new URLSearchParams({ year: academicYear, schools: selectedIds.join(",") });
+  async function requestComparison(schoolIds: string[]) {
+    if (schoolIds.length === 0) return null;
+
+    const params = new URLSearchParams({ year: academicYear, schools: schoolIds.join(",") });
     const response = await fetch(`/api/v1/calendars?${params}`);
     if (!response.ok) throw new Error("Calendar comparison unavailable");
-    comparison = (await response.json()) as CalendarComparison;
+    const nextComparison = (await response.json()) as CalendarComparison;
+    const availableIds = new Set(nextComparison.schools.map((school) => school.id));
+    const unavailableIds = schoolIds.filter((schoolId) => !availableIds.has(schoolId));
+    if (unavailableIds.length > 0) {
+      const unavailableSet = new Set(unavailableIds);
+      const unavailableSchool = allSchools.find((candidate) => candidate.id === unavailableIds[0]);
+      allSchools = allSchools.map((candidate) => unavailableSet.has(candidate.id)
+        ? { ...candidate, availableYears: candidate.availableYears.filter((year) => year !== academicYear) }
+        : candidate);
+
+      // Reconcile schools that were already selected so an old response can
+      // never leave an unpublished calendar visibly labeled as available.
+      const retainedIds = selectedIds.filter((schoolId) => availableIds.has(schoolId));
+      const retainedSet = new Set(retainedIds);
+      selectedIds = retainedIds;
+      comparison = retainedIds.length === 0
+        ? null
+        : {
+            ...nextComparison,
+            schools: nextComparison.schools.filter((school) => retainedSet.has(school.id)),
+            events: nextComparison.events.filter((event) => retainedSet.has(event.schoolId)),
+          };
+      if (retainedIds.length === 0) resetCalendarView();
+      throw new Error(`${unavailableSchool?.shortName ?? "That school"} ${academicYear} is no longer available. Check the calendar again.`);
+    }
+    return nextComparison;
   }
 
   async function addSchool(id: string) {
-    const previousSelectedIds = selectedIds;
+    comparisonError = "";
     await loadSchools();
-    if (!selectedIds.includes(id)) selectedIds = [...selectedIds, id];
-    try {
-      await loadComparison();
-      schoolPickerOpen = false;
-    } catch (cause) {
-      selectedIds = previousSelectedIds;
-      throw cause;
-    }
+    if (selectedIds.includes(id)) return;
+
+    const nextSelectedIds = [...selectedIds, id];
+    const nextComparison = await requestComparison(nextSelectedIds);
+    if (!nextComparison) return;
+
+    if (selectedIds.length === 0) resetCalendarView();
+    selectedIds = nextSelectedIds;
+    comparison = nextComparison;
+    schoolPickerOpen = false;
   }
 
   async function removeSchool(id: string) {
-    if (selectedIds.length === 1) return;
-    selectedIds = selectedIds.filter((schoolId) => schoolId !== id);
-    await loadComparison();
+    if (comparisonUpdating) return;
+    comparisonUpdating = true;
+    comparisonError = "";
+    try {
+      const nextSelectedIds = selectedIds.filter((schoolId) => schoolId !== id);
+      if (nextSelectedIds.length === 0) {
+        selectedIds = [];
+        comparison = null;
+        resetCalendarView();
+        return;
+      }
+
+      const nextComparison = await requestComparison(nextSelectedIds);
+      if (!nextComparison) return;
+      selectedIds = nextSelectedIds;
+      comparison = nextComparison;
+    } catch (cause) {
+      comparisonError = cause instanceof Error ? cause.message : "Could not update this comparison.";
+    } finally {
+      comparisonUpdating = false;
+    }
+  }
+
+  function resetCalendarView() {
+    activeMonth = startOfMonth(academicYearStart);
+    selectedDate = academicYearStart;
   }
 
   function eventsForDate(date: Date) {
@@ -144,7 +201,8 @@
 
   function findBestWindow(events: CalendarEvent[], schoolIds: string[]) {
     if (!events.length || !schoolIds.length) return null;
-    const dates = eachDayOfInterval({ start: new Date(2026, 7, 1), end: new Date(2027, 8, 1) });
+    const academicYearEnd = new Date(academicYearStart.getFullYear() + 1, 8, 1);
+    const dates = eachDayOfInterval({ start: academicYearStart, end: academicYearEnd });
     let best: Date[] = [];
     let current: Date[] = [];
 
@@ -194,25 +252,25 @@
   <section class="product-shell" aria-label="Common Days calendar application">
     <div class="window-bar">
       <div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div>
-      <span>commondays.app/groups/summer-plans</span>
-      <b>DEVELOPMENT DATA</b>
+      <span>COMMON DAYS CALENDAR</span>
     </div>
 
     {#if isLoading}
-      <div class="state-panel"><Sparkles class="spin" size={24} /> Loading the school library...</div>
+      <div class="state-panel" role="status" aria-live="polite"><Sparkles class="spin" size={24} /> Loading the school library...</div>
     {:else if error}
-      <div class="state-panel error"><AlertTriangle size={24} /> {error}. Make sure the API is running.</div>
+      <div class="state-panel error" role="alert"><AlertTriangle size={24} /> {error}. Make sure the API is running.</div>
     {:else}
       <div class="app-grid">
         <aside class="sidebar">
           <div class="group-heading">
-            <div><span>YOUR GROUP</span><h2>Summer plans</h2></div>
-            <button class="round-button" aria-label="Add a school" onclick={() => (schoolPickerOpen = true)}><Plus size={19} /></button>
+            <div>
+              <span>YOUR SCHOOLS</span>
+              <h2>{selectedSchools.length === 0 ? "No schools yet" : `${selectedSchools.length} ${selectedSchools.length === 1 ? "school" : "schools"}`}</h2>
+            </div>
+            <button class="round-button" aria-label="Add a school" disabled={comparisonUpdating} onclick={() => (schoolPickerOpen = true)}><Plus size={19} /></button>
           </div>
 
-          <div class="friend-row" aria-label="Four friends in this group">
-            <i>NV</i><i>MJ</i><i>SK</i><i>+</i><span>4 friends</span>
-          </div>
+          {#if comparisonError}<p class="sidebar-error" role="alert">{comparisonError}</p>{/if}
 
           <div class="school-list">
             {#each selectedSchools as school (school.id)}
@@ -220,78 +278,85 @@
                 <span class="school-avatar" style:background={school.color}>{school.initials}</span>
                 <div><strong>{school.shortName}</strong><small>{academicYear} · Available</small></div>
                 <div class="school-actions">
-                  <button onclick={() => openReport(school)}>Report</button>
-                  <button aria-label={`Remove ${school.shortName}`} onclick={() => removeSchool(school.id)}><X size={13} /></button>
+                  <button disabled={comparisonUpdating} onclick={() => openReport(school)}>Report</button>
+                  <button disabled={comparisonUpdating} aria-label={`Remove ${school.shortName}`} onclick={() => removeSchool(school.id)}><X size={13} /></button>
                 </div>
               </article>
             {/each}
           </div>
 
-          <button class="add-school" onclick={() => (schoolPickerOpen = true)}><Plus size={17} /> Add another school</button>
-
-          <div class="share-card">
-            <span><Sparkles size={18} /></span>
-            <strong>Bring your friends in</strong>
-            <p>Everyone can use the same group comparison.</p>
-            <button>Copy group link</button>
-          </div>
+          {#if selectedSchools.length > 0}
+            <button class="add-school" disabled={comparisonUpdating} onclick={() => (schoolPickerOpen = true)}><Plus size={17} /> Add another school</button>
+          {:else}
+            <p class="sidebar-empty-copy">Choose a school to begin your {academicYear} comparison.</p>
+            <button class="add-school first-school" onclick={() => (schoolPickerOpen = true)}><Plus size={17} /> Add your first school</button>
+          {/if}
         </aside>
 
-        <section class="calendar-panel">
-          <div class="calendar-title">
-            <div><span>ACADEMIC YEAR {academicYear}</span><h2>When is everyone free?</h2></div>
-            <button class="secondary-button"><CalendarDays size={16} /> Year overview</button>
-          </div>
+        <section class:empty={selectedIds.length === 0} class="calendar-panel">
+          {#if selectedIds.length === 0}
+            <div class="empty-comparison">
+              <span class="empty-comparison-icon"><Sparkles size={29} /></span>
+              <span class="empty-comparison-kicker">START A COMPARISON</span>
+              <h2>Add your first school.</h2>
+              <p>Choose a school for {academicYear}. If its calendar is already in the library, we will add it. Otherwise, upload multiple screenshots or one official PDF.</p>
+              <button class="empty-comparison-cta" onclick={() => (schoolPickerOpen = true)}><Plus size={18} /> Choose a school</button>
+            </div>
+          {:else if comparison}
+            <div class="calendar-title">
+              <div><span>ACADEMIC YEAR {academicYear}</span><h2>When is everyone free?</h2></div>
+            </div>
 
-          {#if bestWindow}
-            <button class="best-window" onclick={() => { activeMonth = startOfMonth(bestWindow!.start); selectedDate = bestWindow!.start; }}>
-              <span class="best-icon"><Sparkles size={22} /></span>
-              <span><small>BEST SHARED WINDOW</small><strong>{format(bestWindow.start, "MMM d")} - {format(bestWindow.end, "MMM d")}</strong></span>
-              <span class="best-days"><b>{bestWindow.days}</b><small>days together</small></span>
-              <span>Show on calendar <ArrowRight size={15} /></span>
-            </button>
-          {/if}
+            {#if bestWindow}
+              <button class="best-window" onclick={() => { activeMonth = startOfMonth(bestWindow!.start); selectedDate = bestWindow!.start; }}>
+                <span class="best-icon"><Sparkles size={22} /></span>
+                <span><small>BEST SHARED WINDOW</small><strong>{format(bestWindow.start, "MMM d")} - {format(bestWindow.end, "MMM d")}</strong></span>
+                <span class="best-days"><b>{bestWindow.days}</b><small>days together</small></span>
+                <span>Show on calendar <ArrowRight size={15} /></span>
+              </button>
+            {/if}
 
-          <div class="month-nav">
-            <button aria-label="Previous month" onclick={() => (activeMonth = subMonths(activeMonth, 1))}><ArrowLeft size={18} /></button>
-            <div><span>MONTH VIEW</span><strong>{format(activeMonth, "MMMM yyyy")}</strong></div>
-            <button aria-label="Next month" onclick={() => (activeMonth = addMonths(activeMonth, 1))}><ArrowRight size={18} /></button>
-          </div>
+            <div class="month-nav">
+              <button aria-label="Previous month" onclick={() => (activeMonth = subMonths(activeMonth, 1))}><ArrowLeft size={18} /></button>
+              <div><span>MONTH VIEW</span><strong>{format(activeMonth, "MMMM yyyy")}</strong></div>
+              <button aria-label="Next month" onclick={() => (activeMonth = addMonths(activeMonth, 1))}><ArrowRight size={18} /></button>
+            </div>
 
-          <div class="calendar-wrap">
-            <div class="weekday-row">{#each weekdays as day}<span>{day}</span>{/each}</div>
-            <div class="month-grid">
-              {#each leadingDays as _}<div class="empty-day" aria-hidden="true"></div>{/each}
-              {#each monthDays as date}
-                <button
-                  class:everyone-off={everyoneIsOff(date)}
-                  class:selected={format(date, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd")}
-                  class="day-cell"
-                  aria-label={format(date, "EEEE, MMMM d, yyyy")}
-                  onclick={() => (selectedDate = date)}
-                >
-                  <span class="day-number">{format(date, "d")}</span>
-                  {#if everyoneIsOff(date)}<span class="everyone-label"><Check size={10} /> ALL FREE</span>{/if}
-                  <span class="school-lines" aria-hidden="true">
-                    {#each selectedSchools as school}
-                      <i class:off={schoolIsOff(school.id, date)} style:--school-color={school.color}><b>{school.initials}</b><span></span></i>
-                    {/each}
+            <div class="calendar-wrap">
+              <div class="weekday-row">{#each weekdays as day}<span>{day}</span>{/each}</div>
+              <div class="month-grid">
+                {#each leadingDays as _}<div class="empty-day" aria-hidden="true"></div>{/each}
+                {#each monthDays as date}
+                  <button
+                    class:everyone-off={everyoneIsOff(date)}
+                    class:selected={format(date, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd")}
+                    class="day-cell"
+                    aria-label={format(date, "EEEE, MMMM d, yyyy")}
+                    onclick={() => (selectedDate = date)}
+                  >
+                    <span class="day-number">{format(date, "d")}</span>
+                    {#if everyoneIsOff(date)}<span class="everyone-label"><Check size={10} /> ALL FREE</span>{/if}
+                    <span class="school-lines" aria-hidden="true">
+                      {#each selectedSchools as school}
+                        <i class:off={schoolIsOff(school.id, date)} style:--school-color={school.color}><b>{school.initials}</b><span></span></i>
+                      {/each}
+                    </span>
+                  </button>
+                {/each}
+              </div>
+            </div>
+
+            <div class="date-detail">
+              <div><span>SELECTED DATE</span><strong>{format(selectedDate, "EEEE, MMMM d")}</strong></div>
+              <div class="detail-schools">
+                {#each selectedSchools as school}
+                  <span class:off={schoolIsOff(school.id, selectedDate)} style:--school-color={school.color}>
+                    <i></i>{school.shortName}<b>{schoolIsOff(school.id, selectedDate) ? "No classes" : "Classes"}</b>
                   </span>
-                </button>
-              {/each}
+                {/each}
+              </div>
             </div>
-          </div>
-
-          <div class="date-detail">
-            <div><span>SELECTED DATE</span><strong>{format(selectedDate, "EEEE, MMMM d")}</strong></div>
-            <div class="detail-schools">
-              {#each selectedSchools as school}
-                <span class:off={schoolIsOff(school.id, selectedDate)} style:--school-color={school.color}>
-                  <i></i>{school.shortName}<b>{schoolIsOff(school.id, selectedDate) ? "No classes" : "Classes"}</b>
-                </span>
-              {/each}
-            </div>
-          </div>
+          {/if}
         </section>
       </div>
     {/if}

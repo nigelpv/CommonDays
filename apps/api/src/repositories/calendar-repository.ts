@@ -5,7 +5,6 @@ import type {
   AdminReportStatus,
   CalendarAvailability,
   CalendarComparison,
-  CalendarEvent,
   CalendarReport,
   CalendarSubmission,
   CalendarSubmissionRequest,
@@ -21,7 +20,6 @@ import {
   calendarUploads,
   schools as schoolTable,
 } from "../db/schema.js";
-import { events as seedEvents, schools as seedSchools } from "../data.js";
 import {
   createDurableCalendarSubmission,
   type CalendarSubmissionPersistence,
@@ -128,283 +126,9 @@ export class AdminReportTransitionError extends Error {
 
 export class CalendarRepositoryNotConfiguredError extends Error {
   constructor() {
-    super("DATABASE_URL is required unless the development seed is explicitly enabled.");
+    super("DATABASE_URL is required.");
     this.name = "CalendarRepositoryNotConfiguredError";
   }
-}
-
-type SeedCalendarEvent = CalendarEvent & {
-  academicYear: string;
-  calendarId: string;
-};
-
-function seedCalendarKey(schoolId: string, academicYear: string) {
-  return `${schoolId}:${academicYear}`;
-}
-
-function mockEventsFor(schoolId: string, academicYear: string, submissionId: string) {
-  const startYear = Number(academicYear.slice(0, 4));
-  const nextYear = startYear + 1;
-
-  return [
-    {
-      id: `${submissionId}-thanksgiving`,
-      academicYear,
-      calendarId: submissionId,
-      schoolId,
-      name: "Thanksgiving break",
-      startDate: `${startYear}-11-25`,
-      endDate: `${startYear}-11-29`,
-      kind: "break" as const,
-    },
-    {
-      id: `${submissionId}-winter`,
-      academicYear,
-      calendarId: submissionId,
-      schoolId,
-      name: "Winter break",
-      startDate: `${startYear}-12-20`,
-      endDate: `${nextYear}-01-10`,
-      kind: "break" as const,
-    },
-    {
-      id: `${submissionId}-spring`,
-      academicYear,
-      calendarId: submissionId,
-      schoolId,
-      name: "Spring break",
-      startDate: `${nextYear}-03-06`,
-      endDate: `${nextYear}-03-14`,
-      kind: "break" as const,
-    },
-    {
-      id: `${submissionId}-summer`,
-      academicYear,
-      calendarId: submissionId,
-      schoolId,
-      name: "Summer break",
-      startDate: `${nextYear}-05-02`,
-      endDate: `${nextYear}-08-22`,
-      kind: "break" as const,
-    },
-  ];
-}
-
-export function createSeedRepository(options: { adminUserId?: string } = {}): CalendarRepository {
-  let localSchools = seedSchools.map((school) => ({ ...school, availableYears: [...school.availableYears] }));
-  const publishedCalendarIds = new Map<string, string>();
-  for (const school of localSchools) {
-    for (const academicYear of school.availableYears) {
-      publishedCalendarIds.set(
-        seedCalendarKey(school.id, academicYear),
-        `seed-${school.id}-${academicYear}`,
-      );
-    }
-  }
-  let localEvents: SeedCalendarEvent[] = seedEvents.map((event) => ({
-    ...event,
-    academicYear: "2026-27",
-    calendarId: publishedCalendarIds.get(seedCalendarKey(event.schoolId, "2026-27"))!,
-  }));
-  const submissions = new Map<string, { submission: CalendarSubmission; readyAt: number }>();
-  const reports = new Map<string, AdminReport>();
-  const adminUserId = options.adminUserId ?? process.env.ADMIN_USER_ID ?? null;
-
-  function getSchool(schoolId: string) {
-    const school = localSchools.find((candidate) => candidate.id === schoolId);
-    if (!school) throw new SchoolNotFoundError();
-    return school;
-  }
-
-  function publishIfReady(record: { submission: CalendarSubmission; readyAt: number }) {
-    if (record.submission.status !== "processing" || Date.now() < record.readyAt) return;
-
-    record.submission = { ...record.submission, status: "ready" };
-    localSchools = localSchools.map((school) =>
-      school.id === record.submission.schoolId && !school.availableYears.includes(record.submission.academicYear)
-        ? { ...school, availableYears: [...school.availableYears, record.submission.academicYear] }
-        : school,
-    );
-    publishedCalendarIds.set(
-      seedCalendarKey(record.submission.schoolId, record.submission.academicYear),
-      record.submission.id,
-    );
-    localEvents = [
-      ...localEvents,
-      ...mockEventsFor(record.submission.schoolId, record.submission.academicYear, record.submission.id),
-    ];
-  }
-
-  return {
-    source: "development_seed",
-
-    async searchSchools(query) {
-      const normalizedQuery = query.trim().toLowerCase();
-      return normalizedQuery
-        ? localSchools.filter((school) =>
-            `${school.name} ${school.shortName} ${school.location}`.toLowerCase().includes(normalizedQuery),
-          )
-        : localSchools;
-    },
-
-    async getAvailability(schoolId, academicYear) {
-      const school = getSchool(schoolId);
-      if (school.availableYears.includes(academicYear)) return { schoolId, academicYear, status: "available" };
-
-      const activeSubmission = [...submissions.values()].find(
-        (record) =>
-          record.submission.schoolId === schoolId &&
-          record.submission.academicYear === academicYear &&
-          record.submission.status === "processing",
-      );
-      if (activeSubmission) {
-        publishIfReady(activeSubmission);
-        return activeSubmission.submission.status === "ready"
-          ? { schoolId, academicYear, status: "available" }
-          : { schoolId, academicYear, status: "processing", submissionId: activeSubmission.submission.id };
-      }
-
-      return { schoolId, academicYear, status: "missing" };
-    },
-
-    async getComparison({ academicYear, schoolIds }) {
-      const selectedSchools = schoolIds
-        .map((schoolId) => localSchools.find((school) => school.id === schoolId))
-        .filter((school): school is School => Boolean(school?.availableYears.includes(academicYear)));
-      const selectedSchoolIds = new Set(selectedSchools.map((school) => school.id));
-
-      return {
-        academicYear,
-        schools: selectedSchools,
-        events: localEvents
-          .filter((event) =>
-            selectedSchoolIds.has(event.schoolId) &&
-            event.academicYear === academicYear &&
-            event.calendarId === publishedCalendarIds.get(seedCalendarKey(event.schoolId, academicYear)),
-          )
-          .map(({ academicYear: _academicYear, calendarId: _calendarId, ...event }) => event),
-        source: "development_seed",
-      };
-    },
-
-    async createCalendarSubmission(request, files) {
-      const school = getSchool(request.schoolId);
-      if (school.availableYears.includes(request.academicYear)) throw new CalendarAlreadyAvailableError();
-
-      const activeSubmission = [...submissions.values()].find(
-        (record) =>
-          record.submission.schoolId === request.schoolId &&
-          record.submission.academicYear === request.academicYear &&
-          record.submission.status === "processing",
-      );
-      if (activeSubmission) throw new SubmissionAlreadyInProgressError(activeSubmission.submission.id);
-
-      const submission = CalendarSubmissionSchema.parse({
-        id: crypto.randomUUID(),
-        schoolId: request.schoolId,
-        academicYear: request.academicYear,
-        status: "processing",
-        sourceType: files[0]?.mimeType === "application/pdf" ? "pdf" : "screenshots",
-        fileCount: files.length,
-        createdAt: new Date().toISOString(),
-      });
-      submissions.set(submission.id, { submission, readyAt: Date.now() + 1_200 });
-      return { ...submission };
-    },
-
-    async getCalendarSubmission(id) {
-      const record = submissions.get(id);
-      if (!record) throw new CalendarSubmissionNotFoundError();
-      publishIfReady(record);
-      return { ...record.submission };
-    },
-
-    async createReport(report) {
-      const school = localSchools.find(
-        (candidate) => candidate.id === report.schoolId && candidate.availableYears.includes(report.academicYear),
-      );
-      if (!school) throw new CalendarNotFoundError();
-
-      const calendarId = publishedCalendarIds.get(seedCalendarKey(report.schoolId, report.academicYear));
-      if (!calendarId) throw new CalendarNotFoundError();
-
-      if (report.eventId) {
-        const event = localEvents.find((candidate) => candidate.id === report.eventId);
-        if (
-          !event ||
-          event.schoolId !== report.schoolId ||
-          event.academicYear !== report.academicYear ||
-          event.calendarId !== calendarId
-        ) {
-          throw new ReportEventMismatchError();
-        }
-      }
-
-      const id = crypto.randomUUID();
-      const event = report.eventId
-        ? localEvents.find((candidate) => candidate.id === report.eventId) ?? null
-        : null;
-      reports.set(id, {
-        id,
-        calendarId,
-        schoolId: report.schoolId,
-        schoolName: school.name,
-        schoolShortName: school.shortName,
-        academicYear: report.academicYear,
-        eventId: event?.id ?? null,
-        eventName: event?.name ?? null,
-        eventStartDate: event?.startDate ?? null,
-        eventEndDate: event?.endDate ?? null,
-        reason: report.reason,
-        details: report.details,
-        status: "submitted",
-        createdAt: new Date().toISOString(),
-        resolutionNotes: null,
-        resolvedAt: null,
-      });
-
-      return { id, status: "submitted", ...report };
-    },
-
-    async isAdminUser(userId) {
-      return adminUserId !== null && userId === adminUserId;
-    },
-
-    async listAdminReports(status) {
-      return [...reports.values()]
-        .filter((report) => !status || report.status === status)
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-        .map((report) => ({ ...report }));
-    },
-
-    async getAdminReport(id) {
-      const report = reports.get(id);
-      if (!report) throw new AdminReportNotFoundError();
-      return { ...report };
-    },
-
-    async updateAdminReport(id, action) {
-      const report = reports.get(id);
-      if (!report) throw new AdminReportNotFoundError();
-      if (
-        (action.action === "start_review" && report.status !== "submitted") ||
-        (action.action === "reject" && report.status !== "submitted" && report.status !== "reviewing")
-      ) {
-        throw new AdminReportTransitionError();
-      }
-
-      const updated: AdminReport = action.action === "start_review"
-        ? { ...report, status: "reviewing" }
-        : {
-            ...report,
-            status: "rejected",
-            resolutionNotes: action.resolutionNotes,
-            resolvedAt: new Date().toISOString(),
-          };
-      reports.set(id, updated);
-      return { ...updated };
-    },
-  };
 }
 
 function mapSchool(
@@ -858,18 +582,10 @@ export function createCalendarRepository(
   options: {
     databaseUrl?: string;
     storage?: CalendarStorage | null;
-    allowDevelopmentSeed?: boolean;
-    adminUserId?: string;
   } = {},
 ): CalendarRepository {
   const connection = createDatabase(options.databaseUrl ?? process.env.DATABASE_URL);
-  if (!connection) {
-    const allowDevelopmentSeed = options.allowDevelopmentSeed ?? process.env.USE_DEVELOPMENT_SEED === "true";
-    if (process.env.NODE_ENV === "production" || !allowDevelopmentSeed) {
-      throw new CalendarRepositoryNotConfiguredError();
-    }
-    return createSeedRepository({ adminUserId: options.adminUserId });
-  }
+  if (!connection) throw new CalendarRepositoryNotConfiguredError();
 
   const storage = "storage" in options ? options.storage ?? null : createCalendarStorage();
   return new PostgresCalendarRepository(connection, storage);

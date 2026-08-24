@@ -24,6 +24,42 @@ The script is safe to run again. It preserves the current administrator,
 guards the Auth foreign keys against duplicate creation, and updates the
 existing Storage bucket configuration.
 
+## Seed the school directory
+
+After applying the Drizzle migrations, run [`seed.sql`](./seed.sql) through the
+SQL Editor to add or refresh the five initial school-directory entries. The
+script is idempotent and changes `updated_at` only when a school's directory
+details actually change.
+
+The directory seed does **not** create academic calendars or events. A school
+being present in the directory means students can search for it; a school-year
+becomes available only after its academic calendar goes through the real
+submission and review flow.
+
+## Remove the legacy prototype calendars
+
+The earliest Common Days setup inserted four example 2026-27 calendars and 16
+example events into Supabase. To remove those durable fixtures, run the complete
+[`cleanup_prototype_calendars.sql`](./cleanup_prototype_calendars.sql) file once
+through the SQL Editor.
+
+The cleanup is intentionally narrow and guarded:
+
+- it matches the four confirmed calendar UUIDs, school IDs, academic year, and
+  `development-seed` marker;
+- it requires exactly four calendars and 16 events;
+- it aborts instead of deleting anything if an upload or correction report is
+  attached, or if the expected inventory changed;
+- calendar events are removed through their existing cascade, while the school
+  directory, Auth users, sole-admin record, private bucket, and Storage objects
+  are never targeted;
+- running the file again after a successful cleanup is a safe no-op.
+
+Once removed, UIUC, UC Berkeley, NYU, and Purdue remain searchable schools, but
+their 2026-27 calendars correctly appear missing until official data is
+submitted and processed. Do not edit the UUID inventory or bypass the guards;
+investigate any abort before deciding on a different cleanup.
+
 ## Assign the administrator
 
 Create or invite your account under **Authentication > Users**, copy its user

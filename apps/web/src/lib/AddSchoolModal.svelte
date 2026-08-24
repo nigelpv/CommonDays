@@ -31,7 +31,7 @@
   let files: File[] = [];
   let fileError = "";
   let isDragging = false;
-  let processingStage = "Checking calendar pages";
+  let processingStage = "Saving the official calendar source";
   let dialog: HTMLDivElement;
   let searchInput: HTMLInputElement;
   let fileInput: HTMLInputElement;
@@ -127,9 +127,11 @@
     try {
       await onadd(selectedSchool.id);
     } catch (cause) {
-      step = "ready";
+      step = "school";
+      selectedSchool = null;
       fileError = cause instanceof Error ? cause.message : "That school could not be added.";
-      await focusCurrentStep();
+      await tick();
+      searchInput?.focus();
     } finally {
       isAdding = false;
     }
@@ -186,7 +188,7 @@
   async function submitCalendar() {
     if (!selectedSchool || files.length === 0) return;
     step = "processing";
-    processingStage = "Checking calendar pages";
+    processingStage = "Saving the official calendar source";
     fileError = "";
     await focusCurrentStep();
 
@@ -229,7 +231,9 @@
     let attempt = 0;
 
     while (token === pollToken) {
-      processingStage = attempt === 0 ? "Checking calendar pages" : attempt === 1 ? "Reading dates and breaks" : "Saving this calendar for everyone";
+      processingStage = attempt === 0
+        ? "Upload received. Checking its processing status"
+        : "Upload saved. Waiting for calendar extraction";
       await new Promise((resolve) => setTimeout(resolve, Math.min(450 + attempt * 150, 1_800)));
       if (token !== pollToken) return;
 
@@ -308,9 +312,9 @@
     <button class="modal-close" aria-label="Close" onclick={close}><X size={18} /></button>
 
     {#if step === "school"}
-      <span class="modal-kicker">ADD TO YOUR GROUP</span>
+      <span class="modal-kicker">ADD TO YOUR COMPARISON</span>
       <h2 bind:this={stepHeading} id="school-picker-title" tabindex="-1">What school are we adding?</h2>
-      <p class="picker-year-context">Checking the <strong>{academicYear}</strong> academic year for this group.</p>
+      <p class="picker-year-context">Checking the <strong>{academicYear}</strong> academic year for this comparison.</p>
       <label class="search-box">
         <Search size={18} />
         <span class="sr-only">Search schools</span>
@@ -347,7 +351,7 @@
       </div>
       <div class="availability-card ready">
         <span><Check size={21} /></span>
-        <div><strong>Already in the Common Days library</strong><p>Someone submitted this school year already, so nobody in your group needs to upload it again.</p></div>
+        <div><strong>Already in the Common Days library</strong><p>Someone submitted this school year already, so nobody else needs to upload it again.</p></div>
       </div>
       {#if fileError}<p class="upload-error" role="alert">{fileError}</p>{/if}
       <button class="primary-button lime" disabled={isAdding} onclick={addAvailableSchool}><Plus size={17} /> {isAdding ? "Adding school..." : `Add ${selectedSchool.shortName}`}</button>
@@ -417,24 +421,24 @@
       {/if}
 
       {#if fileError}<p class="upload-error" role="alert">{fileError}</p>{/if}
-      <button class="primary-button" disabled={files.length === 0} onclick={submitCalendar}><Sparkles size={17} /> Read calendar with AI</button>
+      <button class="primary-button" disabled={files.length === 0} onclick={submitCalendar}><Sparkles size={17} /> Submit calendar for processing</button>
     {:else if selectedSchool && step === "processing"}
       <div class="processing-card" role="status" aria-live="polite">
         <span class="processing-icon"><Sparkles size={27} /></span>
-        <span class="modal-kicker">AI CALENDAR READER</span>
-        <h2 bind:this={stepHeading} id="school-picker-title" tabindex="-1">Building {selectedSchool.shortName}&apos;s calendar.</h2>
+        <span class="modal-kicker">CALENDAR SUBMISSION</span>
+        <h2 bind:this={stepHeading} id="school-picker-title" tabindex="-1">Preparing {selectedSchool.shortName}&apos;s calendar.</h2>
         <p>{processingStage}</p>
-        <div class="progress-track" role="progressbar" aria-label="Calendar processing" aria-valuemin="0" aria-valuemax="100" aria-valuenow={processingStage === "Checking calendar pages" ? 30 : processingStage === "Reading dates and breaks" ? 65 : 88}>
-          <span class:middle={processingStage === "Reading dates and breaks"} class:late={processingStage === "Saving this calendar for everyone"}></span>
+        <div class="progress-track" role="progressbar" aria-label="Calendar processing" aria-valuetext={processingStage}>
+          <span></span>
         </div>
-        <small>You can use it as soon as the dates are saved.</small>
+        <small>It will become reusable after extraction finishes.</small>
       </div>
     {:else if selectedSchool && step === "waiting"}
       <div class="processing-card waiting" role="status" aria-live="polite">
         <span class="processing-icon"><LoaderCircle size={28} /></span>
         <span class="modal-kicker">STILL PROCESSING</span>
-        <h2 bind:this={stepHeading} id="school-picker-title" tabindex="-1">{selectedSchool.shortName}&apos;s calendar is still being read.</h2>
-        <p>You can close this window and check again later. The submission will keep processing.</p>
+        <h2 bind:this={stepHeading} id="school-picker-title" tabindex="-1">{selectedSchool.shortName}&apos;s upload is saved.</h2>
+        <p>You can close this window and check again later. It is queued for calendar extraction.</p>
         <button class="primary-button lime" onclick={close}>Got it</button>
       </div>
     {:else if selectedSchool && step === "success"}
@@ -442,7 +446,7 @@
         <span class="processing-icon"><Check size={29} /></span>
         <span class="modal-kicker">SAVED FOR EVERYONE</span>
         <h2 bind:this={stepHeading} id="school-picker-title" tabindex="-1">{selectedSchool.shortName} {academicYear} is ready.</h2>
-        <p>Adding it to your group comparison now.</p>
+        <p>Adding it to your comparison now.</p>
       </div>
     {/if}
   </div>

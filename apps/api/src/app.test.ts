@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
-import { createSeedRepository } from "./repositories/calendar-repository.js";
+import { createTestCalendarRepository } from "./testing/calendar-repository.fixture.js";
 
 let app: ReturnType<typeof createApp>;
 
@@ -18,7 +18,7 @@ function pdfFile(name = "calendar.pdf") {
 
 describe("Common Days API", () => {
   beforeEach(() => {
-    app = createApp(createSeedRepository());
+    app = createApp(createTestCalendarRepository());
   });
 
   afterEach(() => {
@@ -42,7 +42,7 @@ describe("Common Days API", () => {
     expect(body.schools).toHaveLength(2);
     expect(body.schools.map((school: { id: string }) => school.id)).toEqual(["uiuc", "nyu"]);
     expect(body.events.every((event: { schoolId: string }) => ["uiuc", "nyu"].includes(event.schoolId))).toBe(true);
-    expect(body.source).toBe("development_seed");
+    expect(body.source).toBe("supabase");
   });
 
   it("rejects an invalid academic year", async () => {
@@ -53,6 +53,14 @@ describe("Common Days API", () => {
   it("rejects a comparison without schools", async () => {
     const response = await app.request("/api/v1/calendars?schools=&year=2026-27");
     expect(response.status).toBe(400);
+  });
+
+  it("requires an explicit academic year and school selection", async () => {
+    const missingYear = await app.request("/api/v1/calendars?schools=uiuc");
+    const missingSchools = await app.request("/api/v1/calendars?year=2026-27");
+
+    expect(missingYear.status).toBe(400);
+    expect(missingSchools.status).toBe(400);
   });
 
   it("submits a correction report", async () => {
@@ -103,7 +111,7 @@ describe("Common Days API", () => {
     const response = await app.request("/health");
     const body = await response.json();
 
-    expect(body.dataSource).toBe("development_seed");
+    expect(body.dataSource).toBe("supabase");
     expect(JSON.stringify(body)).not.toContain("DATABASE_URL");
   });
 
@@ -229,7 +237,7 @@ describe("Common Days API", () => {
     expect(comparisonBody.events.length).toBeGreaterThan(0);
   });
 
-  it("keeps seed events attached to their exact academic year calendar", async () => {
+  it("keeps fixture events attached to their exact academic year calendar", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-24T12:00:00.000Z"));
     const form = new FormData();

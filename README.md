@@ -17,12 +17,10 @@ Common Days compares college academic calendars and shows the exact dates a grou
 
 ```bash
 npm install
-USE_DEVELOPMENT_SEED=true npm run dev
+npm run dev
 ```
 
-The web app runs at `http://localhost:5173` and proxies API requests to `http://localhost:8787`.
-
-`USE_DEVELOPMENT_SEED=true` explicitly enables the temporary calendars already in the repository when no database URL is configured. Production always requires `DATABASE_URL` and will fail closed instead of silently storing reports or review decisions in memory.
+The web app runs at `http://localhost:5173` and proxies API requests to `http://localhost:8787`. The API always requires `DATABASE_URL` and fails closed instead of substituting calendars, reports, or review decisions in memory.
 
 ## School availability and uploads
 
@@ -34,9 +32,7 @@ The Add School flow checks the shared library for the group's academic year befo
 
 The browser and API both validate file type, file size, PDF/image mixing, and screenshot count. The API also prevents concurrent active submissions for the same school and year.
 
-During credential-free local development, Michigan's 2026-27 calendar is intentionally missing. Uploading files for it runs a short in-memory processing simulation, adds representative development events, and makes the calendar reusable until the API restarts. Uploaded bytes are not written to disk or cloud storage in this mode.
-
-With the database and server-only Supabase Storage variables configured, uploads are stored in the private `calendar-sources` bucket and their metadata is written to PostgreSQL. They remain in processing until the Gemini extraction worker is connected; no example dates are published in Supabase mode.
+With the database and server-only Supabase Storage variables configured, uploads are stored in the private `calendar-sources` bucket and their metadata is written to PostgreSQL. They remain in processing until the Gemini extraction worker is connected; no example dates are generated or published.
 
 ## Private admin review
 
@@ -53,7 +49,7 @@ For Vercel, set the project Root Directory to `apps/web`. Its `vercel.json` send
 
 ## Supabase persistence
 
-The API now has a Drizzle schema and repository for schools, reusable academic-year calendars, extracted events, uploaded source files, and correction reports. Database credentials are optional during development and are never sent to the browser.
+The API now has a Drizzle schema and repository for schools, reusable academic-year calendars, extracted events, uploaded source files, and correction reports. Database credentials are required for local development and are never sent to the browser.
 
 1. Create a free Supabase project and copy its Postgres connection string, project URL, and server secret key.
 2. Create your local API and browser environment files:
@@ -71,13 +67,13 @@ The API now has a Drizzle schema and repository for schools, reusable academic-y
    ```
 
 5. Run the idempotent Supabase-only SQL in [`apps/api/supabase/bootstrap.sql`](apps/api/supabase/bootstrap.sql) through the dashboard SQL Editor. It creates the private upload bucket and the single-admin authorization record described in [`apps/api/supabase/README.md`](apps/api/supabase/README.md).
-6. Optionally load the development schools and published example calendars:
+6. Load or refresh the five-school directory:
 
    ```bash
    npm run db:seed
    ```
 
-The API uses the Supabase-safe `prepare: false` Postgres client setting. If you use a separate direct or session-pooler URL for migrations, place it in `DATABASE_MIGRATION_URL`; runtime requests continue to use `DATABASE_URL`. Row Level Security is enabled on every application table with no public browser policies, so data access stays behind the Hono API until authentication policies are deliberately added.
+The school-directory seed only upserts school names, locations, initials, and colors. It never creates academic calendars or events. The API uses the Supabase-safe `prepare: false` Postgres client setting. If you use a separate direct or session-pooler URL for migrations, place it in `DATABASE_MIGRATION_URL`; runtime requests continue to use `DATABASE_URL`. Row Level Security is enabled on every application table with no public browser policies, so data access stays behind the Hono API until authentication policies are deliberately added.
 
 When the data model changes:
 
@@ -86,7 +82,7 @@ npm run db:generate
 npm run db:migrate
 ```
 
-Review and commit generated SQL from `apps/api/drizzle/`. The seed command only inserts missing development rows and does not delete or overwrite existing calendars.
+Review and commit generated SQL from `apps/api/drizzle/`. The seed command updates school-directory metadata and does not create, delete, or overwrite calendars.
 
 ## Checks
 
@@ -96,4 +92,4 @@ npm test
 npm run build
 ```
 
-Without `DATABASE_URL`, representative development data is available only when `USE_DEVELOPMENT_SEED=true` is explicitly enabled outside production. Durable Supabase Storage and the sole-admin review flow are connected; the Gemini extraction worker, signed source preview, and atomic correction publisher are the next backend slices.
+Durable Supabase Storage and the sole-admin review flow are connected; the Gemini extraction worker, signed source preview, and atomic correction publisher are the next backend slices.
