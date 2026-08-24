@@ -15,6 +15,13 @@
       "when": 1787566695154,
       "tag": "0001_red_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787568081320,
+      "tag": "0002_freezing_stature",
+      "breakpoints": true
     }
   ]
 }

@@ -26,6 +26,8 @@ try {
       })
       .onConflictDoNothing();
 
+    if (!school.availableYears.includes(academicYear)) continue;
+
     const [insertedCalendar] = await connection.db
       .insert(academicCalendars)
       .values({
@@ -75,4 +77,3 @@ try {
 } finally {
   await connection.close();
 }
-

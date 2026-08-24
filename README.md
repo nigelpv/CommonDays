@@ -24,6 +24,20 @@ The web app runs at `http://localhost:5173` and proxies API requests to `http://
 
 If no database URL is configured, the API automatically uses the development calendars already in the repository. The current UI therefore works immediately after `npm install`.
 
+## School availability and uploads
+
+The Add School flow checks the shared library for the group's academic year before adding anything:
+
+- Published calendar: it is reused immediately and no upload is requested.
+- Missing calendar: the first student can submit multiple PNG, JPG, or WebP screenshots, or one PDF.
+- Processing calendar: the UI follows the existing submission instead of creating a duplicate.
+
+The browser and API both validate file type, file size, PDF/image mixing, and screenshot count. The API also prevents concurrent active submissions for the same school and year.
+
+During credential-free local development, Michigan's 2026-27 calendar is intentionally missing. Uploading files for it runs a short in-memory processing simulation, adds representative development events, and makes the calendar reusable until the API restarts. Uploaded bytes are not written to disk or cloud storage in this mode.
+
+With `DATABASE_URL` configured, published and processing availability comes from PostgreSQL. Creating durable submissions remains disabled until the Supabase Storage adapter and Gemini extraction worker are connected in the next backend slice.
+
 ## Supabase persistence
 
 The API now has a Drizzle schema and repository for schools, reusable academic-year calendars, extracted events, uploaded source files, and correction reports. Database credentials are optional during development and are never sent to the browser.

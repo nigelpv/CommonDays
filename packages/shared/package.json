@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
+  "exports": {
+    ".": "./src/index.ts",
+    "./upload-limits": "./src/upload-limits.ts"
+  },
   "scripts": {
     "build": "tsc --noEmit",
     "check": "tsc --noEmit"

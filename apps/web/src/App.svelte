@@ -10,8 +10,9 @@
     startOfMonth,
     subMonths,
   } from "date-fns";
-  import { AlertTriangle, ArrowLeft, ArrowRight, CalendarDays, Check, Plus, Search, Sparkles, X } from "@lucide/svelte";
+  import { AlertTriangle, ArrowLeft, ArrowRight, CalendarDays, Check, Plus, Sparkles, X } from "@lucide/svelte";
   import type { CalendarComparison, CalendarEvent, School } from "@commondays/shared";
+  import AddSchoolModal from "./lib/AddSchoolModal.svelte";
 
   const academicYear = "2026-27";
   const weekdays = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -28,13 +29,8 @@
   let reportSchool: School | null = null;
   let reportDetails = "";
   let reportStatus = "";
-  let query = "";
 
   $: selectedSchools = allSchools.filter((school) => selectedIds.includes(school.id));
-  $: searchResults = allSchools.filter((school) => {
-    if (selectedIds.includes(school.id)) return false;
-    return `${school.name} ${school.shortName} ${school.location}`.toLowerCase().includes(query.toLowerCase());
-  });
   $: monthStart = startOfMonth(activeMonth);
   $: monthDays = eachDayOfInterval({ start: monthStart, end: endOfMonth(activeMonth) });
   $: leadingDays = Array(monthStart.getDay()).fill(null);
@@ -42,10 +38,7 @@
 
   onMount(async () => {
     try {
-      const schoolResponse = await fetch("/api/v1/schools");
-      if (!schoolResponse.ok) throw new Error("School library unavailable");
-      const schoolBody = (await schoolResponse.json()) as { schools: School[] };
-      allSchools = schoolBody.schools;
+      await loadSchools();
       await loadComparison();
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Could not load Common Days";
@@ -53,6 +46,13 @@
       isLoading = false;
     }
   });
+
+  async function loadSchools() {
+    const schoolResponse = await fetch("/api/v1/schools");
+    if (!schoolResponse.ok) throw new Error("School library unavailable");
+    const schoolBody = (await schoolResponse.json()) as { schools: School[] };
+    allSchools = schoolBody.schools;
+  }
 
   async function loadComparison() {
     const params = new URLSearchParams({ year: academicYear, schools: selectedIds.join(",") });
@@ -62,10 +62,16 @@
   }
 
   async function addSchool(id: string) {
-    selectedIds = [...selectedIds, id];
-    schoolPickerOpen = false;
-    query = "";
-    await loadComparison();
+    const previousSelectedIds = selectedIds;
+    await loadSchools();
+    if (!selectedIds.includes(id)) selectedIds = [...selectedIds, id];
+    try {
+      await loadComparison();
+      schoolPickerOpen = false;
+    } catch (cause) {
+      selectedIds = previousSelectedIds;
+      throw cause;
+    }
   }
 
   async function removeSchool(id: string) {
@@ -267,25 +273,13 @@
 </main>
 
 {#if schoolPickerOpen}
-  <div class="modal-backdrop" role="presentation" onclick={(event) => event.target === event.currentTarget && (schoolPickerOpen = false)}>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="school-picker-title" tabindex="-1">
-      <button class="modal-close" aria-label="Close" onclick={() => (schoolPickerOpen = false)}><X size={18} /></button>
-      <span class="modal-kicker">ADD TO YOUR GROUP</span>
-      <h2 id="school-picker-title">What school are we adding?</h2>
-      <label class="search-box"><Search size={18} /><input bind:value={query} placeholder="Search a college or university" /></label>
-      <div class="search-results">
-        {#each searchResults as school}
-          <button onclick={() => addSchool(school.id)}>
-            <span class="school-avatar" style:background={school.color}>{school.initials}</span>
-            <span><strong>{school.name}</strong><small>{school.location} · {academicYear} available</small></span>
-            <Plus size={18} />
-          </button>
-        {:else}
-          <p>No other matching schools yet. Uploading a missing calendar comes next.</p>
-        {/each}
-      </div>
-    </div>
-  </div>
+  <AddSchoolModal
+    schools={allSchools}
+    {selectedIds}
+    {academicYear}
+    onclose={() => (schoolPickerOpen = false)}
+    onadd={addSchool}
+  />
 {/if}
 
 {#if reportOpen && reportSchool}

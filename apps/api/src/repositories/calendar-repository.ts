@@ -1,8 +1,22 @@
-import type { CalendarComparison, CalendarReport, School } from "@commondays/shared";
-import { and, asc, eq, ilike, inArray, or } from "drizzle-orm";
+import { CalendarSubmissionSchema } from "@commondays/shared";
+import type {
+  CalendarAvailability,
+  CalendarComparison,
+  CalendarReport,
+  CalendarSubmission,
+  CalendarSubmissionRequest,
+  School,
+} from "@commondays/shared";
+import { and, asc, count, desc, eq, ilike, inArray, or } from "drizzle-orm";
 import type { DatabaseConnection } from "../db/client.js";
 import { createDatabase } from "../db/client.js";
-import { academicCalendars, calendarEvents, calendarReports, schools as schoolTable } from "../db/schema.js";
+import {
+  academicCalendars,
+  calendarEvents,
+  calendarReports,
+  calendarUploads,
+  schools as schoolTable,
+} from "../db/schema.js";
 import { events as seedEvents, schools as seedSchools } from "../data.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -19,11 +33,59 @@ export type SubmittedReport = CalendarReport & {
   status: "submitted";
 };
 
+export interface CalendarUploadFile {
+  name: string;
+  mimeType: string;
+  size: number;
+  content: Uint8Array;
+}
+
 export interface CalendarRepository {
   readonly source: DataSource;
   searchSchools(query: string): Promise<School[]>;
+  getAvailability(schoolId: string, academicYear: string): Promise<CalendarAvailability>;
   getComparison(query: ComparisonQuery): Promise<CalendarComparison>;
+  createCalendarSubmission(
+    request: CalendarSubmissionRequest,
+    files: CalendarUploadFile[],
+  ): Promise<CalendarSubmission>;
+  getCalendarSubmission(id: string): Promise<CalendarSubmission>;
   createReport(report: CalendarReport): Promise<SubmittedReport>;
+}
+
+export class SchoolNotFoundError extends Error {
+  constructor() {
+    super("That school is not in the Common Days library yet.");
+    this.name = "SchoolNotFoundError";
+  }
+}
+
+export class CalendarAlreadyAvailableError extends Error {
+  constructor() {
+    super("That calendar is already available and can be reused.");
+    this.name = "CalendarAlreadyAvailableError";
+  }
+}
+
+export class CalendarSubmissionNotFoundError extends Error {
+  constructor() {
+    super("That calendar submission could not be found.");
+    this.name = "CalendarSubmissionNotFoundError";
+  }
+}
+
+export class UploadStorageNotConfiguredError extends Error {
+  constructor() {
+    super("Cloud file storage is not connected yet.");
+    this.name = "UploadStorageNotConfiguredError";
+  }
+}
+
+export class SubmissionAlreadyInProgressError extends Error {
+  constructor(readonly submissionId: string) {
+    super("Someone already submitted that calendar and it is being processed.");
+    this.name = "SubmissionAlreadyInProgressError";
+  }
 }
 
 export class CalendarNotFoundError extends Error {
@@ -40,41 +102,158 @@ export class ReportEventMismatchError extends Error {
   }
 }
 
+function mockEventsFor(schoolId: string, academicYear: string, submissionId: string) {
+  const startYear = Number(academicYear.slice(0, 4));
+  const nextYear = startYear + 1;
+
+  return [
+    {
+      id: `${submissionId}-thanksgiving`,
+      schoolId,
+      name: "Thanksgiving break",
+      startDate: `${startYear}-11-25`,
+      endDate: `${startYear}-11-29`,
+      kind: "break" as const,
+    },
+    {
+      id: `${submissionId}-winter`,
+      schoolId,
+      name: "Winter break",
+      startDate: `${startYear}-12-20`,
+      endDate: `${nextYear}-01-10`,
+      kind: "break" as const,
+    },
+    {
+      id: `${submissionId}-spring`,
+      schoolId,
+      name: "Spring break",
+      startDate: `${nextYear}-03-06`,
+      endDate: `${nextYear}-03-14`,
+      kind: "break" as const,
+    },
+    {
+      id: `${submissionId}-summer`,
+      schoolId,
+      name: "Summer break",
+      startDate: `${nextYear}-05-02`,
+      endDate: `${nextYear}-08-22`,
+      kind: "break" as const,
+    },
+  ];
+}
+
 export function createSeedRepository(): CalendarRepository {
+  let localSchools = seedSchools.map((school) => ({ ...school, availableYears: [...school.availableYears] }));
+  let localEvents = seedEvents.map((event) => ({ ...event }));
+  const submissions = new Map<string, { submission: CalendarSubmission; readyAt: number }>();
+
+  function getSchool(schoolId: string) {
+    const school = localSchools.find((candidate) => candidate.id === schoolId);
+    if (!school) throw new SchoolNotFoundError();
+    return school;
+  }
+
+  function publishIfReady(record: { submission: CalendarSubmission; readyAt: number }) {
+    if (record.submission.status !== "processing" || Date.now() < record.readyAt) return;
+
+    record.submission = { ...record.submission, status: "ready" };
+    localSchools = localSchools.map((school) =>
+      school.id === record.submission.schoolId && !school.availableYears.includes(record.submission.academicYear)
+        ? { ...school, availableYears: [...school.availableYears, record.submission.academicYear] }
+        : school,
+    );
+    localEvents = [
+      ...localEvents,
+      ...mockEventsFor(record.submission.schoolId, record.submission.academicYear, record.submission.id),
+    ];
+  }
+
   return {
     source: "development_seed",
 
     async searchSchools(query) {
       const normalizedQuery = query.trim().toLowerCase();
       return normalizedQuery
-        ? seedSchools.filter((school) =>
+        ? localSchools.filter((school) =>
             `${school.name} ${school.shortName} ${school.location}`.toLowerCase().includes(normalizedQuery),
           )
-        : seedSchools;
+        : localSchools;
+    },
+
+    async getAvailability(schoolId, academicYear) {
+      const school = getSchool(schoolId);
+      if (school.availableYears.includes(academicYear)) return { schoolId, academicYear, status: "available" };
+
+      const activeSubmission = [...submissions.values()].find(
+        (record) =>
+          record.submission.schoolId === schoolId &&
+          record.submission.academicYear === academicYear &&
+          record.submission.status === "processing",
+      );
+      if (activeSubmission) {
+        publishIfReady(activeSubmission);
+        return activeSubmission.submission.status === "ready"
+          ? { schoolId, academicYear, status: "available" }
+          : { schoolId, academicYear, status: "processing", submissionId: activeSubmission.submission.id };
+      }
+
+      return { schoolId, academicYear, status: "missing" };
     },
 
     async getComparison({ academicYear, schoolIds }) {
       const selectedSchools = schoolIds
-        .map((schoolId) => seedSchools.find((school) => school.id === schoolId))
+        .map((schoolId) => localSchools.find((school) => school.id === schoolId))
         .filter((school): school is School => Boolean(school?.availableYears.includes(academicYear)));
       const selectedSchoolIds = new Set(selectedSchools.map((school) => school.id));
 
       return {
         academicYear,
         schools: selectedSchools,
-        events: seedEvents.filter((event) => selectedSchoolIds.has(event.schoolId)),
+        events: localEvents.filter((event) => selectedSchoolIds.has(event.schoolId)),
         source: "development_seed",
       };
     },
 
+    async createCalendarSubmission(request, files) {
+      const school = getSchool(request.schoolId);
+      if (school.availableYears.includes(request.academicYear)) throw new CalendarAlreadyAvailableError();
+
+      const activeSubmission = [...submissions.values()].find(
+        (record) =>
+          record.submission.schoolId === request.schoolId &&
+          record.submission.academicYear === request.academicYear &&
+          record.submission.status === "processing",
+      );
+      if (activeSubmission) throw new SubmissionAlreadyInProgressError(activeSubmission.submission.id);
+
+      const submission = CalendarSubmissionSchema.parse({
+        id: crypto.randomUUID(),
+        schoolId: request.schoolId,
+        academicYear: request.academicYear,
+        status: "processing",
+        sourceType: files[0]?.mimeType === "application/pdf" ? "pdf" : "screenshots",
+        fileCount: files.length,
+        createdAt: new Date().toISOString(),
+      });
+      submissions.set(submission.id, { submission, readyAt: Date.now() + 1_200 });
+      return { ...submission };
+    },
+
+    async getCalendarSubmission(id) {
+      const record = submissions.get(id);
+      if (!record) throw new CalendarSubmissionNotFoundError();
+      publishIfReady(record);
+      return { ...record.submission };
+    },
+
     async createReport(report) {
-      const school = seedSchools.find(
+      const school = localSchools.find(
         (candidate) => candidate.id === report.schoolId && candidate.availableYears.includes(report.academicYear),
       );
       if (!school) throw new CalendarNotFoundError();
 
       if (report.eventId) {
-        const event = seedEvents.find((candidate) => candidate.id === report.eventId);
+        const event = localEvents.find((candidate) => candidate.id === report.eventId);
         if (!event || event.schoolId !== report.schoolId) throw new ReportEventMismatchError();
       }
 
@@ -142,6 +321,32 @@ class PostgresCalendarRepository implements CalendarRepository {
     return rows.map((school) => mapSchool(school, yearsBySchool));
   }
 
+  async getAvailability(schoolId: string, academicYear: string): Promise<CalendarAvailability> {
+    const [school] = await this.connection.db
+      .select({ id: schoolTable.id })
+      .from(schoolTable)
+      .where(eq(schoolTable.id, schoolId))
+      .limit(1);
+    if (!school) throw new SchoolNotFoundError();
+
+    const calendarRows = await this.connection.db
+      .select({ id: academicCalendars.id, status: academicCalendars.status })
+      .from(academicCalendars)
+      .where(and(eq(academicCalendars.schoolId, schoolId), eq(academicCalendars.academicYear, academicYear)))
+      .orderBy(desc(academicCalendars.version));
+
+    if (calendarRows.some((calendar) => calendar.status === "published")) {
+      return { schoolId, academicYear, status: "available" };
+    }
+    const activeCalendar = calendarRows.find(
+      (calendar) => calendar.status === "processing" || calendar.status === "needs_review",
+    );
+    if (activeCalendar) {
+      return { schoolId, academicYear, status: "processing", submissionId: activeCalendar.id };
+    }
+    return { schoolId, academicYear, status: "missing" };
+  }
+
   async getComparison({ academicYear, schoolIds }: ComparisonQuery): Promise<CalendarComparison> {
     if (schoolIds.length === 0) {
       return { academicYear, schools: [], events: [], source: "supabase" };
@@ -192,6 +397,50 @@ class PostgresCalendarRepository implements CalendarRepository {
       })),
       source: "supabase",
     };
+  }
+
+  async createCalendarSubmission(): Promise<CalendarSubmission> {
+    throw new UploadStorageNotConfiguredError();
+  }
+
+  async getCalendarSubmission(id: string): Promise<CalendarSubmission> {
+    if (!uuidPattern.test(id)) throw new CalendarSubmissionNotFoundError();
+
+    const [calendar] = await this.connection.db
+      .select({
+        id: academicCalendars.id,
+        schoolId: academicCalendars.schoolId,
+        academicYear: academicCalendars.academicYear,
+        status: academicCalendars.status,
+        sourceType: academicCalendars.sourceType,
+        createdAt: academicCalendars.createdAt,
+      })
+      .from(academicCalendars)
+      .where(eq(academicCalendars.id, id))
+      .limit(1);
+    if (!calendar || (calendar.sourceType !== "screenshots" && calendar.sourceType !== "pdf")) {
+      throw new CalendarSubmissionNotFoundError();
+    }
+
+    const [fileCountRow] = await this.connection.db
+      .select({ value: count() })
+      .from(calendarUploads)
+      .where(eq(calendarUploads.calendarId, calendar.id));
+
+    return CalendarSubmissionSchema.parse({
+      id: calendar.id,
+      schoolId: calendar.schoolId,
+      academicYear: calendar.academicYear,
+      status:
+        calendar.status === "published"
+          ? "ready"
+          : calendar.status === "processing" || calendar.status === "needs_review"
+            ? "processing"
+            : "failed",
+      sourceType: calendar.sourceType,
+      fileCount: fileCountRow.value,
+      createdAt: calendar.createdAt.toISOString(),
+    });
   }
 
   async createReport(report: CalendarReport): Promise<SubmittedReport> {

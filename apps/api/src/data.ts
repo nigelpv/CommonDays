@@ -37,6 +37,15 @@ export const schools: School[] = [
     color: "#bd8c32",
     availableYears: ["2026-27"],
   },
+  {
+    id: "michigan",
+    name: "University of Michigan",
+    shortName: "Michigan",
+    location: "Ann Arbor, Michigan",
+    initials: "MI",
+    color: "#e3ad22",
+    availableYears: [],
+  },
 ];
 
 export const events: CalendarEvent[] = [

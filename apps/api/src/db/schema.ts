@@ -87,6 +87,9 @@ export const academicCalendars = pgTable(
     uniqueIndex("academic_calendars_one_published_idx")
       .on(table.schoolId, table.academicYear)
       .where(sql`${table.status} = 'published'`),
+    uniqueIndex("academic_calendars_one_active_submission_idx")
+      .on(table.schoolId, table.academicYear)
+      .where(sql`${table.status} in ('processing', 'needs_review')`),
     index("academic_calendars_lookup_idx").on(table.schoolId, table.academicYear, table.status),
     check("academic_calendars_year_check", sql`${table.academicYear} ~ '^[0-9]{4}-[0-9]{2}$'`),
     check("academic_calendars_version_check", sql`${table.version} > 0`),

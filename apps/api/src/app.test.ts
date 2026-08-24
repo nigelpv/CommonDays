@@ -1,10 +1,30 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { createSeedRepository } from "./repositories/calendar-repository.js";
 
-const app = createApp(createSeedRepository());
+let app: ReturnType<typeof createApp>;
+
+function pngFile(name: string) {
+  return new File(
+    [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), name],
+    name,
+    { type: "image/png" },
+  );
+}
+
+function pdfFile(name = "calendar.pdf") {
+  return new File(["%PDF-1.7\ncalendar"], name, { type: "application/pdf" });
+}
 
 describe("Common Days API", () => {
+  beforeEach(() => {
+    app = createApp(createSeedRepository());
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("returns searchable schools", async () => {
     const response = await app.request("/api/v1/schools?q=%20Illinois%20");
     const body = await response.json();
@@ -85,5 +105,162 @@ describe("Common Days API", () => {
 
     expect(body.dataSource).toBe("development_seed");
     expect(JSON.stringify(body)).not.toContain("DATABASE_URL");
+  });
+
+  it("distinguishes reusable and missing school years", async () => {
+    const availableResponse = await app.request("/api/v1/schools/uiuc/calendars/2026-27/availability");
+    const missingResponse = await app.request("/api/v1/schools/michigan/calendars/2026-27/availability");
+
+    expect(await availableResponse.json()).toMatchObject({ schoolId: "uiuc", status: "available" });
+    expect(await missingResponse.json()).toMatchObject({ schoolId: "michigan", status: "missing" });
+  });
+
+  it("rejects an upload when that school year is already published", async () => {
+    const form = new FormData();
+    form.append("files", pdfFile());
+
+    const response = await app.request("/api/v1/schools/uiuc/calendars/2026-27/submissions", {
+      method: "POST",
+      body: form,
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.code).toBe("CALENDAR_ALREADY_AVAILABLE");
+  });
+
+  it("rejects mixed screenshot and PDF submissions", async () => {
+    const form = new FormData();
+    form.append("files", pngFile("page.png"));
+    form.append("files", pdfFile());
+
+    const response = await app.request("/api/v1/schools/michigan/calendars/2026-27/submissions", {
+      method: "POST",
+      body: form,
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body.code).toBe("MIXED_UPLOAD_TYPES");
+  });
+
+  it("rejects more than one PDF", async () => {
+    const form = new FormData();
+    form.append("files", pdfFile("fall.pdf"));
+    form.append("files", pdfFile("spring.pdf"));
+
+    const response = await app.request("/api/v1/schools/michigan/calendars/2026-27/submissions", {
+      method: "POST",
+      body: form,
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body.code).toBe("MULTIPLE_PDFS");
+  });
+
+  it("returns a client error for malformed multipart data", async () => {
+    const response = await app.request("/api/v1/schools/michigan/calendars/2026-27/submissions", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data" },
+      body: "not-a-multipart-body",
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.code).toBe("INVALID_MULTIPART");
+  });
+
+  it("surfaces the screenshot limit only after an over-limit submission", async () => {
+    const form = new FormData();
+    for (let index = 0; index < 11; index += 1) {
+      form.append("files", pngFile(`page-${index}.png`));
+    }
+
+    const response = await app.request("/api/v1/schools/michigan/calendars/2026-27/submissions", {
+      method: "POST",
+      body: form,
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body.code).toBe("TOO_MANY_SCREENSHOTS");
+  });
+
+  it("accepts a complete ten-screenshot calendar", async () => {
+    const form = new FormData();
+    for (let index = 0; index < 10; index += 1) {
+      form.append("files", pngFile(`page-${index}.png`));
+    }
+
+    const response = await app.request("/api/v1/schools/michigan/calendars/2026-27/submissions", {
+      method: "POST",
+      body: form,
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(body.submission).toMatchObject({ sourceType: "screenshots", fileCount: 10, status: "processing" });
+  });
+
+  it("processes an uploaded calendar and makes it reusable", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-24T12:00:00.000Z"));
+    const form = new FormData();
+    form.append("files", pdfFile());
+
+    const createResponse = await app.request("/api/v1/schools/michigan/calendars/2026-27/submissions", {
+      method: "POST",
+      body: form,
+    });
+    const created = await createResponse.json();
+
+    expect(createResponse.status).toBe(202);
+    expect(created.submission).toMatchObject({ schoolId: "michigan", status: "processing", sourceType: "pdf" });
+
+    vi.advanceTimersByTime(1_300);
+    const statusResponse = await app.request(`/api/v1/calendar-submissions/${created.submission.id}`);
+    const statusBody = await statusResponse.json();
+    expect(statusBody.submission.status).toBe("ready");
+
+    const comparisonResponse = await app.request("/api/v1/calendars?schools=michigan&year=2026-27");
+    const comparisonBody = await comparisonResponse.json();
+    expect(comparisonBody.schools[0].id).toBe("michigan");
+    expect(comparisonBody.events.length).toBeGreaterThan(0);
+  });
+
+  it("rejects files whose bytes do not match their claimed type", async () => {
+    const form = new FormData();
+    form.append("files", new File(["not a real image"], "fake.png", { type: "image/png" }));
+
+    const response = await app.request("/api/v1/schools/michigan/calendars/2026-27/submissions", {
+      method: "POST",
+      body: form,
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(415);
+    expect(body.code).toBe("FILE_CONTENT_MISMATCH");
+  });
+
+  it("rejects a second submission while one is processing", async () => {
+    const firstForm = new FormData();
+    firstForm.append("files", pdfFile());
+    await app.request("/api/v1/schools/michigan/calendars/2026-27/submissions", {
+      method: "POST",
+      body: firstForm,
+    });
+
+    const secondForm = new FormData();
+    secondForm.append("files", pdfFile("new-calendar.pdf"));
+    const response = await app.request("/api/v1/schools/michigan/calendars/2026-27/submissions", {
+      method: "POST",
+      body: secondForm,
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.code).toBe("SUBMISSION_ALREADY_IN_PROGRESS");
+    expect(body.submissionId).toMatch(/^[0-9a-f-]{36}$/);
   });
 });

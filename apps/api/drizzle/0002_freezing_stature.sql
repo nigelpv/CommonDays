@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "academic_calendars_one_active_submission_idx" ON "academic_calendars" USING btree ("school_id","academic_year") WHERE "academic_calendars"."status" in ('processing', 'needs_review');
