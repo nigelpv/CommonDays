@@ -22,5 +22,5 @@
     "jsdom": "^26.1.0",
     "typescript": "latest"
   },
-  "engines": { "node": ">=20" }
+  "engines": { "node": ">=22" }
 }
