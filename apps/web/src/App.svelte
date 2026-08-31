@@ -259,6 +259,46 @@
     </div>
   </section>
 
+  <section class="system-intro" aria-labelledby="how-it-works-title">
+    <div class="system-intro-heading">
+      <div>
+        <span>HOW THE LIBRARY GROWS</span>
+        <h2 id="how-it-works-title">Upload once.<br /><em>Everyone reuses it.</em></h2>
+      </div>
+      <p>
+        The first student for a school and academic year uploads multiple screenshots or the official PDF. AI extracts the important dates, and Common Days stores that calendar under the school and year, so nobody else has to upload it again. If someone finds a mistake in an academic calendar, they can report it for the admin to verify and fix.
+      </p>
+    </div>
+
+    <ol class="system-flow" aria-label="How a school calendar becomes reusable">
+      <li class="flow-upload">
+        <span class="flow-step">1</span>
+        <span class="flow-icon" aria-hidden="true">↑</span>
+        <h3>Upload multiple screenshots or one PDF</h3>
+        <p>One student submits the academic calendar for 20XX-XY for XYZ school.</p>
+      </li>
+      <li class="flow-extract">
+        <span class="flow-step">2</span>
+        <span class="flow-icon" aria-hidden="true">✦</span>
+        <h3>AI parses the images</h3>
+        <p>It reads each screenshot or the PDF, then extracts the breaks, holidays, and no-class dates.</p>
+      </li>
+      <li class="flow-reuse">
+        <span class="flow-step">3</span>
+        <span class="flow-icon" aria-hidden="true">✓</span>
+        <h3>That year becomes reusable</h3>
+        <p>The next student selects their school and uses it instantly. Found a mistake? Report it so the admin can verify and fix it.</p>
+      </li>
+    </ol>
+
+    <div class="reuse-strip" aria-label="The next student searches their school, finds the calendar available, and uses it without uploading">
+      <span>NEXT STUDENT</span><i aria-hidden="true">→</i>
+      <span>SEARCH SCHOOL</span><i aria-hidden="true">→</i>
+      <span>CALENDAR AVAILABLE</span><i aria-hidden="true">→</i>
+      <strong>USE IT, NO UPLOAD</strong>
+    </div>
+  </section>
+
   <section class="product-shell" aria-label="Common Days calendar application">
     <div class="window-bar">
       <div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div>

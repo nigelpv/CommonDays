@@ -168,6 +168,31 @@ describe("Common Days app", () => {
     expect(comparisonRequests()).toHaveLength(0);
   });
 
+  it("explains the reusable three-step calendar flow before the application", async () => {
+    render(App);
+    await screen.findByRole("heading", { name: "Add your first school." });
+
+    const explainer = screen.getByRole("region", { name: "Upload once. Everyone reuses it." });
+    const application = screen.getByRole("region", { name: "Common Days calendar application" });
+    expect(Boolean(explainer.compareDocumentPosition(application) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+
+    expect(within(explainer).getByText("HOW THE LIBRARY GROWS")).toBeInTheDocument();
+    expect(within(explainer).getByRole("heading", { level: 2, name: "Upload once. Everyone reuses it." })).toBeInTheDocument();
+
+    const flow = within(explainer).getByRole("list", { name: "How a school calendar becomes reusable" });
+    expect(flow.tagName).toBe("OL");
+    const cards = within(flow).getAllByRole("listitem");
+    expect(cards).toHaveLength(3);
+
+    expect(within(cards[0]).getByRole("heading", { level: 3, name: "Upload multiple screenshots or one PDF" })).toBeInTheDocument();
+    expect(within(cards[0]).getByText("One student submits the academic calendar for 20XX-XY for XYZ school.")).toBeInTheDocument();
+    expect(within(cards[1]).getByRole("heading", { level: 3, name: "AI parses the images" })).toBeInTheDocument();
+    expect(within(cards[1]).getByText("It reads each screenshot or the PDF, then extracts the breaks, holidays, and no-class dates.")).toBeInTheDocument();
+    expect(within(cards[2]).getByRole("heading", { level: 3, name: "That year becomes reusable" })).toBeInTheDocument();
+    expect(within(cards[2]).getByText("The next student selects their school and uses it instantly. Found a mistake? Report it so the admin can verify and fix it.")).toBeInTheDocument();
+    expect(within(explainer).queryByText(/person verifies|person to check/i)).not.toBeInTheDocument();
+  });
+
   it("adds the first available school and begins at the academic-year start", async () => {
     render(App);
     await screen.findByRole("heading", { name: "Add your first school." });
