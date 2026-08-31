@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc --noEmit",
     "test": "vitest run src",
@@ -14,12 +15,15 @@
   },
   "dependencies": {
     "@commondays/shared": "*",
+    "@google/genai": "^2.18.0",
     "@hono/node-server": "latest",
     "@supabase/supabase-js": "^2.112.4",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "hono": "latest",
+    "inngest": "^4.18.1",
     "postgres": "^3.4.9",
+    "resend": "^6.22.1",
     "zod": "latest"
   },
   "devDependencies": {

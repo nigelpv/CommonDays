@@ -27,6 +27,12 @@ function createFakes(options: { failUploadAt?: number; failMetadata?: boolean } 
       if (uploads.length + 1 === options.failUploadAt) throw new Error("storage unavailable");
       uploads.push({ path: file.path, contentType: file.contentType });
     },
+    async download() {
+      throw new Error("not used by submission tests");
+    },
+    async createSignedUrl() {
+      return "https://example.test/private-source";
+    },
     async remove(paths) {
       removedPaths.push([...paths]);
     },
@@ -42,7 +48,7 @@ function createFakes(options: { failUploadAt?: number; failMetadata?: boolean } 
         createdAt: new Date("2026-08-24T12:00:00.000Z"),
       };
     },
-    async insertUploads(rows) {
+    async commitUploadsAndQueue(rows) {
       if (options.failMetadata) throw new Error("database unavailable");
       insertedRows.push(rows);
     },

@@ -204,10 +204,29 @@ main {
 .add-school-modal > .modal-kicker:first-of-type, .add-school-modal > h2 { margin-left: 0; }
 .picker-year-context { margin: -9px 0 16px; color: #6b6c65; font-size: 11px; }
 .picker-year-context strong { color: var(--ink); }
+.school-search-guidance { margin: -5px 0 12px; color: #5f6059; font-size: 12px; line-height: 1.5; }
+.school-search-guidance strong { color: var(--ink); }
+.search-section-label { margin: 8px 3px 1px; color: #6a6b64; font-size: 9px; font-weight: 950; letter-spacing: .13em; }
+.search-section-label.suggested { color: #96513f; }
+.search-results > .search-status { display: flex; align-items: center; gap: 7px; }
+.search-warning { margin: 11px 0 0; padding: 10px 12px; border: 1px solid #9a8740; border-radius: 9px; background: #fff4aa; color: #5d511c; font-size: 10px; font-weight: 800; line-height: 1.45; }
 .availability-results > button { min-height: 67px; grid-template-columns: 42px minmax(0,1fr) auto; }
+.availability-results > button.create-school-result { margin-top: 5px; border-style: dashed; border-color: #72736b; background: #eeeadf; }
+.availability-results > button.create-school-result:hover { border-style: solid; background: var(--lime); }
+.create-school-icon { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--ink); border-radius: 10px; background: var(--lime); color: var(--ink); }
+.availability-pill.add-new { background: var(--lavender); }
 .availability-pill { justify-self: end; padding: 6px 8px; border: 1px solid var(--ink); border-radius: 99px; font-size: 8px; font-weight: 950; letter-spacing: .04em; white-space: nowrap; }
 .availability-pill.ready { background: var(--lime); }
 .availability-pill.missing { background: #ffddd7; color: #873224; }
+.new-school-name-card { min-width: 0; display: grid; grid-template-columns: 42px minmax(0,1fr); align-items: center; gap: 12px; margin: 5px 0 17px; padding: 13px; border: 1px solid var(--ink); border-radius: 12px; background: var(--lavender); }
+.new-school-name-card > span:last-child { min-width: 0; display: grid; gap: 4px; }
+.new-school-name-card strong { overflow-wrap: anywhere; font-size: 13px; }
+.new-school-name-card small { color: #65665f; font-size: 9px; }
+.school-location-field { display: grid; gap: 7px; }
+.school-location-field > span { margin-left: 2px; font-size: 10px; font-weight: 950; letter-spacing: .06em; text-transform: uppercase; }
+.school-location-field input { width: 100%; height: 50px; padding: 0 13px; border: 1px solid var(--ink); border-radius: 11px; background: var(--white); outline: 0; font-size: 13px; }
+.school-location-field input:focus { box-shadow: 0 0 0 3px rgba(101,116,247,.2); }
+.new-school-note { margin: 12px 1px 17px; padding: 11px 12px; border: 1px solid #aaa79f; border-radius: 9px; background: #eeeadf; color: #5f6059; font-size: 11px; line-height: 1.5; }
 .selected-school-summary { display: grid; grid-template-columns: 48px minmax(0,1fr) auto; align-items: center; gap: 12px; margin: 8px 0 16px; padding: 13px; border: 1px solid var(--ink); border-radius: 12px; background: var(--white); }
 .selected-school-summary > span:nth-child(2) { min-width: 0; display: grid; gap: 3px; }
 .selected-school-summary strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
@@ -255,6 +274,8 @@ main {
 .progress-track > span { width: 30%; height: 100%; display: block; border-right: 1px solid var(--ink); background: var(--coral); animation: progress-slide 1.2s ease-in-out infinite; }
 @keyframes progress-slide { from { transform: translateX(-100%); } to { transform: translateX(335%); } }
 .processing-card.success .processing-icon { background: var(--lime); }
+.processing-card.failed .processing-icon { background: var(--coral); }
+.processing-card.failed .primary-button { width: min(390px,100%); margin-top: 22px; }
 
 @media (max-width: 980px) {
   .intro { grid-template-columns: 1fr; gap: 22px; }
@@ -297,6 +318,7 @@ main {
   .upload-mode-grid { grid-template-columns: 1fr; }
   .availability-results > button { grid-template-columns: 42px minmax(0,1fr); }
   .availability-pill { grid-column: 2; justify-self: start; }
+  .availability-results > button.create-school-result { grid-template-columns: 42px minmax(0,1fr); }
   .selected-school-summary { grid-template-columns: 44px minmax(0,1fr); }
   .selected-school-summary > b { grid-column: 2; justify-self: start; }
   .selected-files-heading { align-items: flex-start; }

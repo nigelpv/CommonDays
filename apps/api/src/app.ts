@@ -1,7 +1,9 @@
 import {
   AdminMeResponseSchema,
   AdminReportActionSchema,
+  AdminReportDetailResponseSchema,
   AdminReportResponseSchema,
+  AdminReportSourceUrlResponseSchema,
   AdminReportsResponseSchema,
   AdminReportStatusSchema,
   AcademicYearSchema,
@@ -11,9 +13,12 @@ import {
   CALENDAR_UPLOAD_MAX_TOTAL_BYTES,
   CalendarReportSchema,
   CalendarSubmissionRequestSchema,
+  SchoolCreateRequestSchema,
+  SchoolCreateResponseSchema,
+  SchoolSearchResponseSchema,
   type AdminIdentity,
 } from "@commondays/shared";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import {
@@ -21,8 +26,13 @@ import {
   type AdminTokenVerifier,
 } from "./auth/admin-auth.js";
 import {
+  AdminCorrectionConflictError,
+  AdminCorrectionValidationError,
   AdminReportNotFoundError,
+  AdminReportSourceNotFoundError,
+  AdminReportSourceUnavailableError,
   AdminReportTransitionError,
+  AdminReviewerAuthorizationError,
   CalendarNotFoundError,
   CalendarAlreadyAvailableError,
   CalendarSubmissionNotFoundError,
@@ -34,6 +44,10 @@ import {
   type CalendarUploadFile,
   UploadStorageNotConfiguredError,
 } from "./repositories/calendar-repository.js";
+import type {
+  CalendarExtractionQueue,
+  SchoolSimilarityAlertQueue,
+} from "./inngest/calendar-extraction.js";
 
 const acceptedImageTypes = new Set<string>(CALENDAR_UPLOAD_IMAGE_TYPES);
 type AppEnvironment = {
@@ -45,6 +59,10 @@ type AppEnvironment = {
 type AppOptions = {
   adminTokenVerifier?: AdminTokenVerifier | null;
   corsOrigins?: string[];
+  calendarExtractionQueue?: CalendarExtractionQueue | null;
+  schoolSimilarityAlertQueue?: SchoolSimilarityAlertQueue | null;
+  schoolCreationRateLimit?: { maxCreations: number; windowMs: number } | null;
+  inngestHandler?: ((context: Context) => Promise<Response>) | null;
 };
 
 function normalizeCorsOrigin(origin: string) {
@@ -90,6 +108,18 @@ const calendarUploadBodyLimit = bodyLimit({
     context.json({ error: "Those files are too large together.", code: "UPLOAD_TOO_LARGE" }, 413),
 });
 
+const schoolCreateBodyLimit = bodyLimit({
+  maxSize: 8 * 1024,
+  onError: (context) =>
+    context.json({ error: "That school entry is too large.", code: "SCHOOL_ENTRY_TOO_LARGE" }, 413),
+});
+
+const adminReportActionBodyLimit = bodyLimit({
+  maxSize: 16 * 1024,
+  onError: (context) =>
+    context.json({ error: "That correction request is too large.", code: "CORRECTION_TOO_LARGE" }, 413),
+});
+
 function bodyFiles(value: string | File | (string | File)[] | undefined) {
   const values = Array.isArray(value) ? value : value ? [value] : [];
   return values.filter((item): item is File => typeof item !== "string");
@@ -130,6 +160,12 @@ export function createApp(
     ? options.adminTokenVerifier ?? null
     : createAdminTokenVerifier();
   const corsOrigins = resolveCorsOrigins(options.corsOrigins);
+  const calendarExtractionQueue = options.calendarExtractionQueue ?? null;
+  const schoolSimilarityAlertQueue = options.schoolSimilarityAlertQueue ?? null;
+  const schoolCreationRateLimit = options.schoolCreationRateLimit === undefined
+    ? { maxCreations: 20, windowMs: 60 * 60 * 1000 }
+    : options.schoolCreationRateLimit;
+  let schoolCreationTimestamps: number[] = [];
 
   app.use("/api/*", cors({
     origin: corsOrigins,
@@ -137,8 +173,17 @@ export function createApp(
     allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
   }));
 
+  if (options.inngestHandler) {
+    app.on(["GET", "PUT", "POST"], "/api/inngest", options.inngestHandler);
+  }
+
   app.get("/health", (context) =>
-    context.json({ status: "ok", service: "common-days-api", dataSource: repository.source }),
+    context.json({
+      status: "ok",
+      service: "common-days-api",
+      dataSource: repository.source,
+      schoolSimilarityEmail: schoolSimilarityAlertQueue ? "configured" : "queued_only",
+    }),
   );
 
   app.use("/api/v1/admin/*", async (context, next) => {
@@ -190,16 +235,46 @@ export function createApp(
 
   app.get("/api/v1/admin/reports/:id", async (context) => {
     try {
-      return context.json(AdminReportResponseSchema.parse({
+      return context.json(AdminReportDetailResponseSchema.parse({
         report: await repository.getAdminReport(context.req.param("id")),
       }));
     } catch (error) {
       if (error instanceof AdminReportNotFoundError) return context.json({ error: error.message }, 404);
+      if (error instanceof AdminCorrectionConflictError) {
+        return context.json({ error: error.message, code: "CALENDAR_VERSION_CONFLICT" }, 409);
+      }
+      if (error instanceof AdminReportSourceUnavailableError) {
+        return context.json({ error: error.message, code: "REPORT_SOURCE_UNAVAILABLE" }, 503);
+      }
       throw error;
     }
   });
 
-  app.patch("/api/v1/admin/reports/:id", async (context) => {
+  app.post("/api/v1/admin/reports/:id/source-files/:uploadId/signed-url", async (context) => {
+    context.header("Cache-Control", "private, no-store");
+    try {
+      const response = AdminReportSourceUrlResponseSchema.parse(
+        await repository.createAdminReportSourceUrl(
+          context.req.param("id"),
+          context.req.param("uploadId"),
+        ),
+      );
+      return context.json(response);
+    } catch (error) {
+      if (error instanceof AdminReportSourceNotFoundError) {
+        return context.json({ error: error.message, code: "REPORT_SOURCE_NOT_FOUND" }, 404);
+      }
+      if (error instanceof UploadStorageNotConfiguredError) {
+        return context.json({ error: error.message, code: "UPLOAD_STORAGE_NOT_CONFIGURED" }, 503);
+      }
+      if (error instanceof AdminReportSourceUnavailableError) {
+        return context.json({ error: error.message, code: "REPORT_SOURCE_UNAVAILABLE" }, 503);
+      }
+      throw error;
+    }
+  });
+
+  app.patch("/api/v1/admin/reports/:id", adminReportActionBodyLimit, async (context) => {
     let payload: unknown;
     try {
       payload = await context.req.json();
@@ -209,7 +284,12 @@ export function createApp(
 
     const action = AdminReportActionSchema.safeParse(payload);
     if (!action.success) {
-      return context.json({ error: "Invalid report action.", issues: action.error.flatten() }, 400);
+      const isCorrection = typeof payload === "object" && payload !== null &&
+        "action" in payload && payload.action === "apply_correction";
+      return context.json(
+        { error: "Invalid report action.", issues: action.error.flatten() },
+        isCorrection ? 422 : 400,
+      );
     }
 
     try {
@@ -220,12 +300,23 @@ export function createApp(
       );
       const message = action.data.action === "start_review"
         ? "Report marked as under review."
-        : "Report rejected with review notes.";
+        : action.data.action === "reject"
+          ? "Report rejected with review notes."
+          : "The corrected calendar is now published and the report is resolved.";
       return context.json(AdminReportResponseSchema.parse({ report, message }));
     } catch (error) {
       if (error instanceof AdminReportNotFoundError) return context.json({ error: error.message }, 404);
       if (error instanceof AdminReportTransitionError) {
         return context.json({ error: error.message, code: "REPORT_STATUS_CONFLICT" }, 409);
+      }
+      if (error instanceof AdminCorrectionConflictError) {
+        return context.json({ error: error.message, code: "CALENDAR_VERSION_CONFLICT" }, 409);
+      }
+      if (error instanceof AdminCorrectionValidationError) {
+        return context.json({ error: error.message, code: "INVALID_CALENDAR_CORRECTION" }, 422);
+      }
+      if (error instanceof AdminReviewerAuthorizationError) {
+        return context.json({ error: error.message, code: "ADMIN_FORBIDDEN" }, 403);
       }
       throw error;
     }
@@ -233,7 +324,59 @@ export function createApp(
 
   app.get("/api/v1/schools", async (context) => {
     const query = context.req.query("q")?.trim() ?? "";
-    return context.json({ schools: await repository.searchSchools(query) });
+    if (query.length > 160) {
+      return context.json({ error: "Search using 160 characters or fewer." }, 400);
+    }
+    return context.json(SchoolSearchResponseSchema.parse(await repository.searchSchools(query)));
+  });
+
+  app.post("/api/v1/schools", schoolCreateBodyLimit, async (context) => {
+    let payload: unknown;
+    try {
+      payload = await context.req.json();
+    } catch {
+      return context.json({ error: "Invalid JSON body." }, 400);
+    }
+
+    const result = SchoolCreateRequestSchema.safeParse(payload);
+    if (!result.success) {
+      return context.json({ error: "Enter a full school name and location.", issues: result.error.flatten() }, 400);
+    }
+
+    if (schoolCreationRateLimit) {
+      const now = Date.now();
+      schoolCreationTimestamps = schoolCreationTimestamps.filter(
+        (createdAt) => createdAt > now - schoolCreationRateLimit.windowMs,
+      );
+      if (schoolCreationTimestamps.length >= schoolCreationRateLimit.maxCreations) {
+        const retryAfterSeconds = Math.max(
+          1,
+          Math.ceil((schoolCreationTimestamps[0]! + schoolCreationRateLimit.windowMs - now) / 1000),
+        );
+        context.header("Retry-After", String(retryAfterSeconds));
+        return context.json({
+          error: "Too many schools were added recently. Try again later.",
+          code: "SCHOOL_CREATION_RATE_LIMITED",
+        }, 429);
+      }
+      schoolCreationTimestamps.push(now);
+    }
+
+    const created = await repository.createSchool(result.data);
+    if (created.alertId && schoolSimilarityAlertQueue) {
+      void schoolSimilarityAlertQueue.enqueue(created.alertId).catch((error) => {
+        // The alert was committed atomically with the school and the recovery
+        // worker will retry it. Notification infrastructure never blocks a
+        // trusted user from creating the school they entered.
+        console.error("School similarity alert enqueue failed", error);
+      });
+    }
+
+    return context.json(SchoolCreateResponseSchema.parse({
+      school: created.school,
+      similarSchools: created.similarSchools,
+      alertQueued: created.alertId !== null,
+    }), 201);
   });
 
   app.get("/api/v1/schools/:schoolId/calendars/:academicYear/availability", async (context) => {
@@ -277,6 +420,15 @@ export function createApp(
             submissionId: availability.submissionId,
           },
           409,
+        );
+      }
+      if (!calendarExtractionQueue) {
+        return context.json(
+          {
+            error: "Automatic calendar processing is not configured yet.",
+            code: "CALENDAR_PROCESSING_NOT_CONFIGURED",
+          },
+          503,
         );
       }
 
@@ -342,6 +494,27 @@ export function createApp(
         );
       }
       const submission = await repository.createCalendarSubmission(requestResult.data, uploadFiles);
+
+      try {
+        await calendarExtractionQueue.enqueue(submission.id);
+      } catch (error) {
+        console.error("Calendar extraction enqueue failed", error);
+        try {
+          await repository.failCalendarExtraction(
+            submission.id,
+            "The background extraction service could not accept this submission.",
+          );
+        } catch (cleanupError) {
+          console.error("Calendar extraction enqueue cleanup failed", cleanupError);
+        }
+        return context.json(
+          {
+            error: "The calendar was saved, but automatic processing could not start. Please try again.",
+            code: "CALENDAR_PROCESSING_UNAVAILABLE",
+          },
+          503,
+        );
+      }
 
       return context.json(
         { submission, message: "Academic calendar submitted for processing." },

@@ -1,7 +1,9 @@
 import "dotenv/config";
 import { schoolDirectory } from "../data.js";
+import { normalizeSchoolName } from "../schools/school-similarity.js";
 import { createDatabase } from "./client.js";
 import { schools as schoolTable } from "./schema.js";
+
 const connection = createDatabase();
 
 if (!connection) {
@@ -15,6 +17,7 @@ try {
       .values({
         id: school.id,
         name: school.name,
+        normalizedName: normalizeSchoolName(school.name),
         shortName: school.shortName,
         location: school.location,
         initials: school.initials,
@@ -24,6 +27,7 @@ try {
         target: schoolTable.id,
         set: {
           name: school.name,
+          normalizedName: normalizeSchoolName(school.name),
           shortName: school.shortName,
           location: school.location,
           initials: school.initials,

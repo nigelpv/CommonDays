@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { apiFetch } from "./api.js";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
 const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim();
@@ -29,5 +30,5 @@ export async function adminFetch(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   headers.set("authorization", `Bearer ${data.session.access_token}`);
 
-  return fetch(path, { ...init, headers });
+  return apiFetch(path, { ...init, headers });
 }

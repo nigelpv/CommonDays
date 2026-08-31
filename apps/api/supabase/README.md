@@ -5,7 +5,8 @@ belong in the Drizzle schema:
 
 - a locked-down `private` schema;
 - a singleton record identifying the one Common Days administrator;
-- links from calendar submitters and report reviewers to Supabase Auth users;
+- links from calendar submitters, report reviewers, and correction audit
+  reviewers to Supabase Auth users;
 - the private `calendar-sources` Storage bucket.
 
 It deliberately creates no `anon` or `authenticated` policies on
@@ -24,6 +25,10 @@ The script is safe to run again. It preserves the current administrator,
 guards the Auth foreign keys against duplicate creation, and updates the
 existing Storage bucket configuration.
 
+Rerun the bootstrap after applying migration `0007_melodic_venus`. That
+migration adds the calendar-correction audit table, and the bootstrap then
+adds its guarded reviewer foreign key to Supabase Auth.
+
 ## Seed the school directory
 
 After applying the Drizzle migrations, run [`seed.sql`](./seed.sql) through the
@@ -33,8 +38,9 @@ details actually change.
 
 The directory seed does **not** create academic calendars or events. A school
 being present in the directory means students can search for it; a school-year
-becomes available only after its academic calendar goes through the real
-submission and review flow.
+becomes available only after its academic calendar goes through AI extraction,
+server validation, and automatic publication. Administrator review happens
+only when a student later reports a mistake in a published calendar.
 
 ## Remove the legacy prototype calendars
 

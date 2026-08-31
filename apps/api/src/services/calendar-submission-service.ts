@@ -35,7 +35,7 @@ export interface CalendarSubmissionPersistence {
     request: CalendarSubmissionRequest,
     sourceType: ReservedCalendarSubmission["sourceType"],
   ): Promise<ReservedCalendarSubmission>;
-  insertUploads(uploads: PersistedCalendarUpload[]): Promise<void>;
+  commitUploadsAndQueue(uploads: PersistedCalendarUpload[]): Promise<void>;
   markFailed(calendarId: string): Promise<void>;
 }
 
@@ -104,7 +104,7 @@ export async function createDurableCalendarSubmission({
       });
     }
 
-    await persistence.insertUploads(uploadRows);
+    await persistence.commitUploadsAndQueue(uploadRows);
 
     return CalendarSubmissionSchema.parse({
       id: reserved.id,

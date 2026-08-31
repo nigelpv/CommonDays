@@ -11,18 +11,21 @@
     subMonths,
   } from "date-fns";
   import { AlertTriangle, ArrowLeft, ArrowRight, Check, Plus, Sparkles, X } from "@lucide/svelte";
+  import { getAcademicYearDateWindow } from "@commondays/shared/academic-year";
   import type { CalendarComparison, CalendarEvent, School } from "@commondays/shared";
   import AddSchoolModal from "./lib/AddSchoolModal.svelte";
+  import { apiFetch } from "./lib/api.js";
 
   const academicYear = "2026-27";
-  const academicYearStart = new Date(Number(academicYear.slice(0, 4)), 7, 1);
+  const academicYearWindow = getAcademicYearDateWindow(academicYear);
+  const initialCalendarDate = new Date(Number(academicYear.slice(0, 4)), 7, 1);
   const weekdays = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 
   let comparison: CalendarComparison | null = null;
   let allSchools: School[] = [];
   let selectedIds: string[] = [];
-  let activeMonth = startOfMonth(academicYearStart);
-  let selectedDate = academicYearStart;
+  let activeMonth = startOfMonth(initialCalendarDate);
+  let selectedDate = initialCalendarDate;
   let isLoading = true;
   let error = "";
   let comparisonError = "";
@@ -56,17 +59,22 @@
   });
 
   async function loadSchools() {
-    const schoolResponse = await fetch("/api/v1/schools");
+    const schoolResponse = await apiFetch("/api/v1/schools");
     if (!schoolResponse.ok) throw new Error("School library unavailable");
     const schoolBody = (await schoolResponse.json()) as { schools: School[] };
     allSchools = schoolBody.schools;
+  }
+
+  function upsertSchool(school: School) {
+    const withoutSchool = allSchools.filter((candidate) => candidate.id !== school.id);
+    allSchools = [...withoutSchool, school].sort((left, right) => left.name.localeCompare(right.name));
   }
 
   async function requestComparison(schoolIds: string[]) {
     if (schoolIds.length === 0) return null;
 
     const params = new URLSearchParams({ year: academicYear, schools: schoolIds.join(",") });
-    const response = await fetch(`/api/v1/calendars?${params}`);
+    const response = await apiFetch(`/api/v1/calendars?${params}`);
     if (!response.ok) throw new Error("Calendar comparison unavailable");
     const nextComparison = (await response.json()) as CalendarComparison;
     const availableIds = new Set(nextComparison.schools.map((school) => school.id));
@@ -136,8 +144,8 @@
   }
 
   function resetCalendarView() {
-    activeMonth = startOfMonth(academicYearStart);
-    selectedDate = academicYearStart;
+    activeMonth = startOfMonth(initialCalendarDate);
+    selectedDate = initialCalendarDate;
   }
 
   function eventsForDate(date: Date) {
@@ -177,7 +185,7 @@
     reportSubmitting = true;
     reportStatus = "";
     try {
-      const response = await fetch("/api/v1/reports", {
+      const response = await apiFetch("/api/v1/reports", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -201,8 +209,10 @@
 
   function findBestWindow(events: CalendarEvent[], schoolIds: string[]) {
     if (!events.length || !schoolIds.length) return null;
-    const academicYearEnd = new Date(academicYearStart.getFullYear() + 1, 8, 1);
-    const dates = eachDayOfInterval({ start: academicYearStart, end: academicYearEnd });
+    const dates = eachDayOfInterval({
+      start: parseISO(academicYearWindow.startDate),
+      end: parseISO(academicYearWindow.endDate),
+    });
     let best: Date[] = [];
     let current: Date[] = [];
 
@@ -370,6 +380,7 @@
     {academicYear}
     onclose={() => (schoolPickerOpen = false)}
     onadd={addSchool}
+    oncreated={upsertSchool}
   />
 {/if}
 

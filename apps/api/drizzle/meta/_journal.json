@@ -22,6 +22,41 @@
       "when": 1787568081320,
       "tag": "0002_freezing_stature",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787591475471,
+      "tag": "0003_brave_sugar_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787623728650,
+      "tag": "0004_silent_tattoo",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787629257298,
+      "tag": "0005_quiet_mathemanic",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787629998087,
+      "tag": "0006_low_alex_wilder",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788094219129,
+      "tag": "0007_melodic_venus",
+      "breakpoints": true
     }
   ]
 }

@@ -105,6 +105,23 @@ begin
 end
 $block$;
 
+do $block$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'calendar_corrections_reviewed_by_auth_users_fk'
+      and conrelid = 'public.calendar_corrections'::regclass
+  ) then
+    alter table public.calendar_corrections
+      add constraint calendar_corrections_reviewed_by_auth_users_fk
+      foreign key (reviewed_by)
+      references auth.users (id)
+      on delete restrict;
+  end if;
+end
+$block$;
+
 -- Source documents stay private. Uploads and downloads are performed only by
 -- the trusted backend; this bootstrap deliberately creates no storage.objects
 -- policies for anon or authenticated users.

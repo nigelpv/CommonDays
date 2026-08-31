@@ -3,6 +3,7 @@ import { createApp } from "./app.js";
 import { createTestCalendarRepository } from "./testing/calendar-repository.fixture.js";
 
 let app: ReturnType<typeof createApp>;
+const enqueueCalendarExtraction = vi.fn(async () => undefined);
 
 function pngFile(name: string) {
   return new File(
@@ -18,7 +19,10 @@ function pdfFile(name = "calendar.pdf") {
 
 describe("Common Days API", () => {
   beforeEach(() => {
-    app = createApp(createTestCalendarRepository());
+    enqueueCalendarExtraction.mockClear();
+    app = createApp(createTestCalendarRepository(), {
+      calendarExtractionQueue: { enqueue: enqueueCalendarExtraction },
+    });
   });
 
   afterEach(() => {
@@ -112,6 +116,7 @@ describe("Common Days API", () => {
     const body = await response.json();
 
     expect(body.dataSource).toBe("supabase");
+    expect(body.schoolSimilarityEmail).toBe("queued_only");
     expect(JSON.stringify(body)).not.toContain("DATABASE_URL");
   });
 
@@ -209,6 +214,44 @@ describe("Common Days API", () => {
 
     expect(response.status).toBe(202);
     expect(body.submission).toMatchObject({ sourceType: "screenshots", fileCount: 10, status: "processing" });
+    expect(enqueueCalendarExtraction).toHaveBeenCalledWith(body.submission.id);
+  });
+
+  it("does not accept source files when automatic processing is not configured", async () => {
+    const appWithoutProcessing = createApp(createTestCalendarRepository());
+    const form = new FormData();
+    form.append("files", pdfFile());
+
+    const response = await appWithoutProcessing.request(
+      "/api/v1/schools/michigan/calendars/2026-27/submissions",
+      { method: "POST", body: form },
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body.code).toBe("CALENDAR_PROCESSING_NOT_CONFIGURED");
+  });
+
+  it("marks a saved submission failed when the durable queue cannot accept it", async () => {
+    const repository = createTestCalendarRepository();
+    const markFailed = vi.spyOn(repository, "failCalendarExtraction");
+    const appWithUnavailableQueue = createApp(repository, {
+      calendarExtractionQueue: {
+        enqueue: vi.fn().mockRejectedValue(new Error("queue unavailable")),
+      },
+    });
+    const form = new FormData();
+    form.append("files", pdfFile());
+
+    const response = await appWithUnavailableQueue.request(
+      "/api/v1/schools/michigan/calendars/2026-27/submissions",
+      { method: "POST", body: form },
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body.code).toBe("CALENDAR_PROCESSING_UNAVAILABLE");
+    expect(markFailed).toHaveBeenCalledOnce();
   });
 
   it("processes an uploaded calendar and makes it reusable", async () => {

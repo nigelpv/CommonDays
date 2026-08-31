@@ -9,6 +9,8 @@ export interface CalendarStorageUpload {
 export interface CalendarStorage {
   readonly bucket: string;
   upload(file: CalendarStorageUpload): Promise<void>;
+  download(path: string): Promise<Uint8Array>;
+  createSignedUrl(path: string, expiresInSeconds: number): Promise<string>;
   remove(paths: string[]): Promise<void>;
 }
 
@@ -55,6 +57,27 @@ export class SupabaseCalendarStorage implements CalendarStorage {
       throw new Error("Supabase Storage could not remove calendar source files.", { cause: error });
     }
   }
+
+  async download(path: string) {
+    const { data, error } = await this.client.storage.from(this.bucket).download(path);
+    if (error || !data) {
+      throw new Error("Supabase Storage could not read a calendar source file.", { cause: error });
+    }
+    return new Uint8Array(await data.arrayBuffer());
+  }
+
+  async createSignedUrl(path: string, expiresInSeconds: number) {
+    const { data, error } = await this.client.storage
+      .from(this.bucket)
+      .createSignedUrl(path, expiresInSeconds);
+    if (error || !data?.signedUrl) {
+      throw new Error("Supabase Storage could not create a private calendar source link.", {
+        cause: error,
+      });
+    }
+    return data.signedUrl;
+  }
+
 }
 
 interface StorageEnvironment {
